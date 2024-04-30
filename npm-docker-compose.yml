@@ -1,0 +1,16 @@
+version: '3'
+services:
+  npm:
+    image: 'chishin/nginx-proxy-manager-zh:release'
+    restart: always
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./home/npm/data:/data
+      - ./home/npm/letsencrypt:/etc/letsencrypt
+
+# Username:  admin@example.com
+# Password:  changeme
+# https://github.com/xiaoxinpro/nginx-proxy-manager-zh
