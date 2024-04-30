@@ -975,7 +975,7 @@ case $choice in
               echo "BBR管理"
               echo "------------------------"
               echo "1. 开启BBR              2. 关闭BBR（会重启）"
-              echo "最新XanMod内核BBR3在上一页系统工具目录
+              echo "最新XanMod内核BBR3在上一页系统工具目录"
               echo "------------------------"
               echo "0. 返回上一级选单"
               echo "------------------------"
