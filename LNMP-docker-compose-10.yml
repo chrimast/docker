@@ -13,7 +13,7 @@ services:
       - ./conf.d:/etc/nginx/conf.d
       - ./certs:/etc/nginx/certs
       - ./html:/var/www/html
-      - ./log/nginx:/var/log/nginx
+      - ./nginx/log:/var/log/nginx
 
 
   php:
