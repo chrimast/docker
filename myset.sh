@@ -612,13 +612,13 @@ while true; do
 clear
 
 echo -e "\033[96m一键脚本工具 v1.1.1 （支持Ubuntu/Debian/CentOS/Alpine系统）\033[0m"
-echo -e "\033[96m-输入\033[93m字母o\033[96m可快速启动此脚本-\033[0m"
+echo -e "\033[96m-输入\033[93m字母【o】\033[96m可快速启动此脚本-\033[0m"
 echo "------------------------"
 echo "1. 系统信息"
 echo "2. 系统更新"
 echo "3. 系统清理"
 echo "4. 常用工具 ▶"
-echo "5. BBR管理 ------ XanMod内核BBR3在【系统工具】目录 ▶"
+echo "5. BBR管理 ▶"
 echo "6. Docker管理 ▶ "
 echo "7. WARP管理 ▶ "
 echo "8. 测试脚本合集 ▶ "
@@ -628,7 +628,7 @@ echo "11. 面板工具 ▶ "
 echo "12. 我的工作区 ▶ "
 echo "13. 系统工具 ▶ "
 echo "------------------------"
-echo "00. 脚本更新"
+echo "99. 重启服务器"
 echo "------------------------"
 echo "0. 退出脚本"
 echo "------------------------"
@@ -948,9 +948,12 @@ case $choice in
               remove $removename
               ;;
 
+          99)
+              clear
+              server_reboot
+              ;;
           0)
               myset
-
               ;;
 
           *)
@@ -975,7 +978,7 @@ case $choice in
               echo "BBR管理"
               echo "------------------------"
               echo "1. 开启BBR              2. 关闭BBR（会重启）"
-              echo "最新XanMod内核BBR3在上一页系统工具目录"
+              echo "---最新XanMod内核BBR3在主菜单（系统工具）"
               echo "------------------------"
               echo "0. 返回上一级选单"
               echo "------------------------"
@@ -1363,7 +1366,6 @@ EOF
               ;;
           0)
               myset
-
               ;;
           *)
               echo "无效的输入!"
@@ -2039,9 +2041,7 @@ EOF
 
                 docker restart nginx
 
-
                 ;;
-
 
             3)
                 docker exec -it nginx rm -rf /var/cache/nginx
@@ -3438,8 +3438,6 @@ EOF
       echo "20. 定时任务管理"
       echo "21. 本机host解析"
       echo "22. fail2banSSH防御程序"
-      echo "------------------------"
-      echo "31. 留言板"
       echo "------------------------"
       echo "99. 重启服务器"
       echo "------------------------"
@@ -4846,44 +4844,6 @@ EOF
                   ;;
               esac
             fi
-              ;;
-
-          31)
-            clear
-            install sshpass
-
-            remote_ip="66.42.61.110"
-            remote_user="liaotian123"
-            remote_file="/home/liaotian123/liaotian.txt"
-            password="kejilionYYDS"  # 替换为您的密码
-
-            clear
-            echo "科技lion留言板"
-            echo "------------------------"
-            # 显示已有的留言内容
-            sshpass -p "${password}" ssh -o StrictHostKeyChecking=no "${remote_user}@${remote_ip}" "cat '${remote_file}'"
-            echo ""
-            echo "------------------------"
-
-            # 判断是否要留言
-            read -p "是否要留言？(y/n): " leave_message
-
-            if [ "$leave_message" == "y" ] || [ "$leave_message" == "Y" ]; then
-                # 输入新的留言内容
-                read -p "输入你的昵称: " nicheng
-                read -p "输入你的聊天内容: " neirong
-
-                # 添加新留言到远程文件
-                sshpass -p "${password}" ssh -o StrictHostKeyChecking=no "${remote_user}@${remote_ip}" "echo -e '${nicheng}: ${neirong}' >> '${remote_file}'"
-                echo "已添加留言: "
-                echo "${nicheng}: ${neirong}"
-                echo ""
-            else
-                echo "您选择了不留言。"
-            fi
-
-            echo "留言板操作完成。"
-
               ;;
 
           99)
