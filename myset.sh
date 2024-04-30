@@ -1,5 +1,5 @@
 #!/bin/bash
-ln -sf ~/mylinux.sh /usr/local/bin/o
+ln -sf ~/myset.sh /usr/local/bin/o
 
 
 ip_address() {
@@ -75,7 +75,7 @@ break_end() {
       clear
 }
 
-mylinux() {
+myset() {
             o
             exit
 }
@@ -99,7 +99,7 @@ check_port() {
             echo -e "\e[1;31m端口 $PORT 已被占用，无法安装环境，卸载以下程序后重试！\e[0m"
             echo "$result"
             break_end
-            mylinux
+            myset
 
         fi
     else
@@ -611,8 +611,8 @@ server_reboot() {
 while true; do
 clear
 
-echo -e "\033[96m科技lion一键脚本工具 v2.4.2 （支持Ubuntu/Debian/CentOS/Alpine系统）\033[0m"
-echo -e "\033[96m-输入\033[93mk\033[96m可快速启动此脚本-\033[0m"
+echo -e "\033[96m一键脚本工具 v1.1.1 （支持Ubuntu/Debian/CentOS/Alpine系统）\033[0m"
+echo -e "\033[96m-输入\033[93m字母o\033[96m可快速启动此脚本-\033[0m"
 echo "------------------------"
 echo "1. 系统信息"
 echo "2. 系统更新"
@@ -949,7 +949,7 @@ case $choice in
               ;;
 
           0)
-              mylinux
+              myset
 
               ;;
 
@@ -1362,7 +1362,7 @@ EOF
               esac
               ;;
           0)
-              mylinux
+              myset
 
               ;;
           *)
@@ -1470,7 +1470,7 @@ EOF
 
 
           0)
-              mylinux
+              myset
 
               ;;
           *)
@@ -1580,7 +1580,7 @@ EOF
 
               ;;
           0)
-              mylinux
+              myset
 
               ;;
           *)
@@ -2448,7 +2448,7 @@ EOF
         ;;
 
     0)
-        mylinux
+        myset
       ;;
 
     *)
@@ -3292,7 +3292,7 @@ EOF
           curl -L https://raw.githubusercontent.com/oneclickvirt/pve/main/scripts/install_pve.sh -o install_pve.sh && chmod +x install_pve.sh && bash install_pve.sh
               ;;
           0)
-              mylinux
+              myset
               ;;
           *)
               echo "无效的输入!"
@@ -3399,7 +3399,7 @@ EOF
               tmux list-sessions
               ;;
           0)
-              mylinux
+              myset
               ;;
           *)
               echo "无效的输入!"
@@ -3451,7 +3451,7 @@ EOF
           1)
               clear
               read -p "请输入你的快捷按键: " kuaijiejian
-              echo "alias $kuaijiejian='~/mylinux.sh'" >> ~/.bashrc
+              echo "alias $kuaijiejian='~/myset.sh'" >> ~/.bashrc
               source ~/.bashrc
               echo "快捷键已设置"
               ;;
@@ -4891,7 +4891,7 @@ EOF
               server_reboot
               ;;
           0)
-              mylinux
+              myset
 
               ;;
           *)
