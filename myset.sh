@@ -1639,7 +1639,7 @@ EOF
       install_certbot
 
       # 创建必要的目录和文件
-      cd /home && mkdir -p web/html web/mysql web/certs web/conf.d web/redis web/nginx/log && touch web/docker-compose.yml
+      cd /home && mkdir -p -m 755 web/html web/mysql web/certs web/conf.d web/redis web/nginx/log && touch web/docker-compose.yml
 
       wget -O /home/web/nginx.conf https://raw.githubusercontent.com/kejilion/nginx/main/nginx10.conf
       wget -O /home/web/conf.d/default.conf https://raw.githubusercontent.com/kejilion/nginx/main/default10.conf
@@ -1874,14 +1874,14 @@ EOF
       install_docker
       install_certbot
 
-      cd /home && mkdir -p web/html web/mysql web/certs web/conf.d web/redis web/nginx/log && touch web/docker-compose.yml
+      cd /home && mkdir -p -m 755 web/html web/mysql web/certs web/conf.d web/redis web/nginx/log && touch web/docker-compose.yml
 
       wget -O /home/web/nginx.conf https://raw.githubusercontent.com/kejilion/nginx/main/nginx10.conf
       wget -O /home/web/conf.d/default.conf https://raw.githubusercontent.com/kejilion/nginx/main/default10.conf
       default_server_ssl
       docker rm -f nginx >/dev/null 2>&1
       docker rmi nginx nginx:alpine >/dev/null 2>&1
-      docker run -d --name nginx --restart always -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
+      docker run -d --name nginx --restart always --network web_default -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
 
       clear
       nginx_version=$(docker exec nginx nginx -v 2>&1)
