@@ -1824,7 +1824,7 @@ EOF
       add_yuming
       install_ssltls
 
-      docker run -d --name halo --restart always --network web_default -p 8010:8090 -v /home/web/html/$yuming/.halo2:/root/.halo2 halohub/halo:2
+      docker run -d --name halo --restart always -p 8010:8090 -v /home/web/html/$yuming/.halo2:/root/.halo2 halohub/halo:2
       duankou=8010
       reverse_proxy
 
@@ -1881,7 +1881,7 @@ EOF
       default_server_ssl
       docker rm -f nginx >/dev/null 2>&1
       docker rmi nginx nginx:alpine >/dev/null 2>&1
-      docker run -d --name nginx --restart always --network web_default -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
+      docker run -d --name nginx --restart always -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
 
       clear
       nginx_version=$(docker exec nginx nginx -v 2>&1)
@@ -2320,7 +2320,7 @@ EOF
           wget -O /home/web/nginx.conf https://raw.githubusercontent.com/kejilion/nginx/main/nginx10.conf
           wget -O /home/web/conf.d/default.conf https://raw.githubusercontent.com/kejilion/nginx/main/default10.conf
           default_server_ssl
-          docker run -d --name nginx --restart always --network web_default -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
+          docker run -d --name nginx --restart always -p 80:80 -p 443:443 -p 443:443/udp -v /home/web/nginx.conf:/etc/nginx/nginx.conf -v /home/web/conf.d:/etc/nginx/conf.d -v /home/web/certs:/etc/nginx/certs -v /home/web/html:/var/www/html -v /home/web/nginx/log:/var/log/nginx nginx:alpine
           docker exec -it nginx chmod -R 777 /var/www/html
 
           f2b_install_sshd
@@ -2468,7 +2468,7 @@ EOF
       echo "3. 1Panel新一代管理面板                 4. NginxProxyManager可视化面板"
       echo "5. AList多存储文件列表程序              6. Ubuntu远程桌面网页版"
       echo "7. 哪吒探针VPS监控面板                  8. QB离线BT磁力下载面板"
-      echo "9. Poste.io邮件服务器程序               12. 青龙面板定时任务管理平台"
+      echo "12. 青龙面板定时任务管理平台"
       echo "13. Cloudreve网盘                       14. 简单图床图片管理程序"
       echo "18. onlyoffice在线办公OFFICE              19. 雷池WAF防火墙面板"
       echo "20. portainer容器管理面板               21. VScode网页版"
@@ -2751,136 +2751,6 @@ EOF
 
             docker_app
 
-              ;;
-
-          9)
-            if docker inspect mailserver &>/dev/null; then
-
-                    clear
-                    echo "poste.io已安装，访问地址: "
-                    yuming=$(cat /home/docker/mail.txt)
-                    echo "https://$yuming"
-                    echo ""
-
-                    echo "应用操作"
-                    echo "------------------------"
-                    echo "1. 更新应用             2. 卸载应用"
-                    echo "------------------------"
-                    echo "0. 返回上一级选单"
-                    echo "------------------------"
-                    read -p "请输入你的选择: " sub_choice
-
-                    case $sub_choice in
-                        1)
-                            clear
-                            docker rm -f mailserver
-                            docker rmi -f analogic/poste.io
-
-                            yuming=$(cat /home/docker/mail.txt)
-                            docker run \
-                                --net=host \
-                                -e TZ=Europe/Prague \
-                                -v /home/docker/mail:/data \
-                                --name "mailserver" \
-                                -h "$yuming" \
-                                --restart=always \
-                                -d analogic/poste.io
-
-                            clear
-                            echo "poste.io已经安装完成"
-                            echo "------------------------"
-                            echo "您可以使用以下地址访问poste.io:"
-                            echo "https://$yuming"
-                            echo ""
-                            ;;
-                        2)
-                            clear
-                            docker rm -f mailserver
-                            docker rmi -f analogic/poste.io
-                            rm /home/docker/mail.txt
-                            rm -rf /home/docker/mail
-                            echo "应用已卸载"
-                            ;;
-                        0)
-                            break  # 跳出循环，退出菜单
-                            ;;
-                        *)
-                            break  # 跳出循环，退出菜单
-                            ;;
-                    esac
-            else
-                clear
-                install telnet
-
-                clear
-                echo ""
-                echo "端口检测"
-                port=25
-                timeout=3
-
-                if echo "quit" | timeout $timeout telnet smtp.qq.com $port | grep 'Connected'; then
-                  echo -e "\e[32m端口$port当前可用\e[0m"
-                else
-                  echo -e "\e[31m端口$port当前不可用\e[0m"
-                fi
-                echo "------------------------"
-                echo ""
-
-
-                echo "安装提示"
-                echo "poste.io一个邮件服务器，确保80和443端口没被占用，确保25端口开放"
-                echo "官网介绍: https://hub.docker.com/r/analogic/poste.io"
-                echo ""
-
-                # 提示用户确认安装
-                read -p "确定安装poste.io吗？(Y/N): " choice
-                case "$choice" in
-                    [Yy])
-                    clear
-
-                    read -p "请设置邮箱域名 例如 mail.yuming.com : " yuming
-                    mkdir -p /home/docker      # 递归创建目录
-                    echo "$yuming" > /home/docker/mail.txt  # 写入文件
-                    echo "------------------------"
-                    ip_address
-                    echo "先解析这些DNS记录"
-                    echo "A           mail            $ipv4_address"
-                    echo "CNAME       imap            $yuming"
-                    echo "CNAME       pop             $yuming"
-                    echo "CNAME       smtp            $yuming"
-                    echo "MX          @               $yuming"
-                    echo "TXT         @               v=spf1 mx ~all"
-                    echo "TXT         ?               ?"
-                    echo ""
-                    echo "------------------------"
-                    echo "按任意键继续..."
-                    read -n 1 -s -r -p ""
-
-                    install_docker
-
-                    docker run \
-                        --net=host \
-                        -e TZ=Europe/Prague \
-                        -v /home/docker/mail:/data \
-                        --name "mailserver" \
-                        -h "$yuming" \
-                        --restart=always \
-                        -d analogic/poste.io
-
-                    clear
-                    echo "poste.io已经安装完成"
-                    echo "------------------------"
-                    echo "您可以使用以下地址访问poste.io:"
-                    echo "https://$yuming"
-                    echo ""
-
-                        ;;
-                    [Nn])
-                        ;;
-                    *)
-                        ;;
-                esac
-            fi
               ;;
 
           12)
