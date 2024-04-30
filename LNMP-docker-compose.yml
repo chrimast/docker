@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   nginx:aaa
-    image: nginx
+    image:
     container_name: nginx
     restart: always
     ports:
