@@ -1113,7 +1113,7 @@ EOF
                           docker stop $(docker ps -q)
                           ;;
                       8)
-                          read -p "确定删除所有容器吗？(Y/N)：" choice
+                          read -p "确定删除所有容器吗？(Y/N): " choice
                           case "$choice" in
                             [Yy])
                               docker rm -f $(docker ps -a -q)
