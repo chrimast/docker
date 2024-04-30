@@ -4846,9 +4846,13 @@ EOF
             fi
               ;;
 
+          99)
+              clear
+              server_reboot
+              ;;
+
           0)
               myset
-
               ;;
           *)
               echo "无效的输入!"
