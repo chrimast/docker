@@ -2272,10 +2272,12 @@ EOF
 
                       cd /home/fail2ban/config/fail2ban/action.d
                       curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/cloudflare-docker.conf
-
+                      
+                      sed -i "/^action =/ s/$/, iptables-allports/" /home/fail2ban/config/fail2ban/action.d/cloudflare-docker.conf
+                      
                       sed -i "s/kejilion@outlook.com/$cfuser/g" /home/fail2ban/config/fail2ban/action.d/cloudflare-docker.conf
                       sed -i "s/APIKEY00000/$cftoken/g" /home/fail2ban/config/fail2ban/action.d/cloudflare-docker.conf
-                      sed -i "/^action =/ s/$/, iptables-allports/" /home/fail2ban/config/fail2ban/action.d/cloudflare-docker.conf
+
                       f2b_status
 
                       echo "已配置cloudflare模式，可在cf后台，站点-安全性-事件中查看拦截记录"
