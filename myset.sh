@@ -80,33 +80,6 @@ myset() {
             exit
 }
 
-check_port() {
-    # 定义要检测的端口
-    PORT=443
-
-    # 检查端口占用情况
-    result=$(ss -tulpn | grep ":$PORT")
-
-    # 判断结果并输出相应信息
-    if [ -n "$result" ]; then
-        is_nginx_container=$(docker ps --format '{{.Names}}' | grep 'nginx')
-
-        # 判断是否是Nginx容器占用端口
-        if [ -n "$is_nginx_container" ]; then
-            echo ""
-        else
-            clear
-            echo -e "\e[1;31m端口 $PORT 已被占用，无法安装环境，卸载以下程序后重试！\e[0m"
-            echo "$result"
-            break_end
-            myset
-
-        fi
-    else
-        echo ""
-    fi
-}
-
 install_add_docker() {
     if [ -f "/etc/alpine-release" ]; then
         apk update
@@ -282,71 +255,6 @@ tmux_run() {
     fi
 }
 
-
-f2b_status() {
-     docker restart fail2ban
-     sleep 3
-     docker exec -it fail2ban fail2ban-client status
-}
-
-f2b_status_xxx() {
-    docker exec -it fail2ban fail2ban-client status $xxx
-}
-
-f2b_install_sshd() {
-
-    docker run -d \
-        --name=fail2ban \
-        --net=host \
-        --cap-add=NET_ADMIN \
-        --cap-add=NET_RAW \
-        -e PUID=1000 \
-        -e PGID=1000 \
-        -e TZ=Etc/UTC \
-        -e VERBOSITY=-vv \
-        -v /home/fail2ban/config:/config \
-        -v /var/log:/var/log:ro \
-        -v /home/web/nginx/log/:/remotelogs/nginx:ro \
-        --restart unless-stopped \
-        lscr.io/linuxserver/fail2ban:latest
-
-    sleep 3
-    if grep -q 'Alpine' /etc/issue; then
-        cd /home/fail2ban/config/fail2ban/filter.d
-        curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/alpine-sshd.conf
-        curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/alpine-sshd-ddos.conf
-        cd /home/fail2ban/config/fail2ban/jail.d/
-        curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/alpine-ssh.conf
-    elif grep -qi 'CentOS' /etc/redhat-release; then
-        cd /home/fail2ban/config/fail2ban/jail.d/
-        curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/centos-ssh.conf
-    else
-        install rsyslog
-        systemctl start rsyslog
-        systemctl enable rsyslog
-        cd /home/fail2ban/config/fail2ban/jail.d/
-        curl -sS -O https://raw.githubusercontent.com/kejilion/config/main/fail2ban/linux-ssh.conf
-    fi
-}
-
-f2b_sshd() {
-    if grep -q 'Alpine' /etc/issue; then
-        xxx=alpine-sshd
-        f2b_status_xxx
-    elif grep -qi 'CentOS' /etc/redhat-release; then
-        xxx=centos-sshd
-        f2b_status_xxx
-    else
-        xxx=linux-sshd
-        f2b_status_xxx
-    fi
-}
-
-
-
-
-
-
 server_reboot() {
 
     read -p $'\e[33m现在重启服务器吗？(Y/N): \e[0m' rboot
@@ -365,7 +273,6 @@ server_reboot() {
 
 
 }
-
 
 
 
@@ -2312,7 +2219,6 @@ EOF
       echo "19. 切换系统更新源"
       echo "20. 定时任务管理"
       echo "21. 本机host解析"
-      echo "22. fail2banSSH防御程序"
       echo "------------------------"
       echo "99. 重启服务器"
       echo "------------------------"
@@ -3625,101 +3531,6 @@ EOF
               done
               ;;
 
-          22)
-            if docker inspect fail2ban &>/dev/null ; then
-                while true; do
-                    clear
-                    echo "SSH防御程序已启动"
-                    echo "------------------------"
-                    echo "1. 查看SSH拦截记录"
-                    echo "2. 日志实时监控"
-                    echo "------------------------"
-                    echo "9. 卸载防御程序"
-                    echo "------------------------"
-                    echo "0. 退出"
-                    echo "------------------------"
-                    read -p "请输入你的选择: " sub_choice
-                    case $sub_choice in
-
-                        1)
-                            echo "------------------------"
-                            f2b_sshd
-                            echo "------------------------"
-                            ;;
-                        2)
-                            tail -f /home/fail2ban/config/log/fail2ban/fail2ban.log
-                            break
-                            ;;
-                        9)
-                            docker rm -f fail2ban
-                            rm -rf /home/fail2ban
-                            remove fail2ban
-                            rm -rf /etc/fail2ban
-                            echo "Fail2Ban防御程序已卸载"
-
-                            break
-                            ;;
-                        0)
-                            break
-                            ;;
-                        *)
-                            echo "无效的选择，请重新输入。"
-                            ;;
-                    esac
-                    break_end
-
-                done
-
-            elif [ -x "$(command -v fail2ban-client)" ] ; then
-                clear
-                echo "卸载旧版fail2ban"
-                read -p "确定继续吗？(Y/N): " choice
-                case "$choice" in
-                  [Yy])
-                    docker rm -f fail2ban
-                    rm -rf /home/fail2ban
-                    remove fail2ban
-                    rm -rf /etc/fail2ban
-                    echo "Fail2Ban防御程序已卸载"
-                    ;;
-                  [Nn])
-                    echo "已取消"
-                    ;;
-                  *)
-                    echo "无效的选择，请输入 Y 或 N。"
-                    ;;
-                esac
-
-            else
-
-              clear
-              echo "fail2ban是一个SSH防止暴力破解工具"
-              echo "官网介绍: https://github.com/fail2ban/fail2ban"
-              echo "------------------------------------------------"
-              echo "工作原理：研判非法IP恶意高频访问SSH端口，自动进行IP封锁"
-              echo "------------------------------------------------"
-              read -p "确定继续吗？(Y/N): " choice
-
-              case "$choice" in
-                [Yy])
-                  clear
-                  install_docker
-                  f2b_install_sshd
-
-                  cd ~
-                  f2b_status
-                  echo "Fail2Ban防御程序已开启"
-
-                  ;;
-                [Nn])
-                  echo "已取消"
-                  ;;
-                *)
-                  echo "无效的选择，请输入 Y 或 N。"
-                  ;;
-              esac
-            fi
-              ;;
 
           99)
               clear
