@@ -1465,11 +1465,11 @@ EOF
                             iptables_open
                             install wget
                             if [ "$system_type" == "centos" ]; then
-                                yum install -y wget && wget -O install.sh http://www.bt5.me/install.sh && sh install.sh
+                                yum install -y wget && wget -O install.sh https://install.baota.sbs/install/install_6.0.sh && sh install.sh
                             elif [ "$system_type" == "ubuntu" ]; then
-                                wget -O install.sh http://www.bt5.me/install/install_7.0.sh && bash install.sh
+                                wget -O install.sh https://install.baota.sbs/install/install_6.0.sh && bash install.sh
                             elif [ "$system_type" == "debian" ]; then
-                                wget -O install.sh http://www.bt5.me/install/install_7.0.sh && bash install.sh
+                                wget -O install.sh https://install.baota.sbs/install/install_6.0.sh && bash install.sh
                             fi
                             ;;
                         [Nn])
