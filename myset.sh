@@ -2211,7 +2211,7 @@ EOF
       echo "11. 查看端口占用状态"
       echo "12. 修改虚拟内存大小"
       echo "13. 用户管理"
-      echo "14. 用户/密码生成器"
+      echo "14. ☆fail2ban防御程序☆"
       echo "15. 系统时区调整"
       echo "16. 设置BBR3加速"
       echo "17. 防火墙高级管理器"
@@ -2804,51 +2804,53 @@ EOF
           14)
             clear
 
-            echo "随机用户名"
-            echo "------------------------"
-            for i in {1..5}; do
-                username="user$(< /dev/urandom tr -dc _a-z0-9 | head -c6)"
-                echo "随机用户名 $i: $username"
-            done
+              echo "------------------------"
+              echo "1. 查看SSH拦截记录                2. 查看网站拦截记录"
+              echo "3. 查看防御规则列表               4. 查看日志实时监控"
+              echo "------------------------"
+              echo "11. 配置拦截参数（含cloudflare参数）"
+              echo "------------------------"
+              echo "0. 退出"
+              echo "------------------------"
+              read -p "请输入你的选择: " sub_choice
+              case $sub_choice in
+                  1)
+                      echo "------------------------"
+                      fail2ban-client status sshd
+                      echo "------------------------"
+                      ;;
+                  2)
+                      echo "------------------------"
+                      fail2ban-client status docker-nginx-cc
+                      echo "------------------------"
+                      fail2ban-client status docker-nginx-badbots
+                      echo "------------------------"
+                      fail2ban-client status docker-nginx-botsearch
+                      echo "------------------------"
+                      fail2ban-client status docker-nginx-http-auth
+                      echo "------------------------"
+                      fail2ban-client status docker-nginx-limit-req
+                      echo "------------------------"
+                      fail2ban-client status docker-php-url-fopen
+                      echo "------------------------"
+                      ;;
 
-            echo ""
-            echo "随机姓名"
-            echo "------------------------"
-            first_names=("John" "Jane" "Michael" "Emily" "David" "Sophia" "William" "Olivia" "James" "Emma" "Ava" "Liam" "Mia" "Noah" "Isabella")
-            last_names=("Smith" "Johnson" "Brown" "Davis" "Wilson" "Miller" "Jones" "Garcia" "Martinez" "Williams" "Lee" "Gonzalez" "Rodriguez" "Hernandez")
-
-            # 生成5个随机用户姓名
-            for i in {1..5}; do
-                first_name_index=$((RANDOM % ${#first_names[@]}))
-                last_name_index=$((RANDOM % ${#last_names[@]}))
-                user_name="${first_names[$first_name_index]} ${last_names[$last_name_index]}"
-                echo "随机用户姓名 $i: $user_name"
-            done
-
-            echo ""
-            echo "随机UUID"
-            echo "------------------------"
-            for i in {1..5}; do
-                uuid=$(cat /proc/sys/kernel/random/uuid)
-                echo "随机UUID $i: $uuid"
-            done
-
-            echo ""
-            echo "16位随机密码"
-            echo "------------------------"
-            for i in {1..5}; do
-                password=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c16)
-                echo "随机密码 $i: $password"
-            done
-
-            echo ""
-            echo "32位随机密码"
-            echo "------------------------"
-            for i in {1..5}; do
-                password=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c32)
-                echo "随机密码 $i: $password"
-            done
-            echo ""
+                  3)
+                      fail2ban-client status
+                      ;;
+                  4)
+                      tail -f /var/log/fail2ban.log
+                      ;;
+                  11)                      
+                      curl -sS -O https://raw.gitmirror.com/chrimast/docker/main/f2b.sh && chmod +x f2b.sh && ./f2b.sh
+                      fail2ban-client status
+                      ;;
+                  0)
+                      break
+                      ;;
+                  *)
+                      echo "无效的选择，请重新输入。"
+                      ;;
 
               ;;
 
