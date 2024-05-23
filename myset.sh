@@ -2802,7 +2802,8 @@ EOF
               ;;
 
           14)
-            clear
+              while true; do
+              clear
 
               echo "------------------------"
               echo "1. 查看SSH拦截记录                2. 查看网站拦截记录"
@@ -2851,7 +2852,7 @@ EOF
                   *)
                       echo "无效的选择，请重新输入。"
                       ;;
-                esac
+              esac
             done
               ;;
 
