@@ -27,10 +27,10 @@ services:
     volumes:
       - ./mysql:/var/lib/mysql
     environment:
-      - MYSQL_ROOT_PASSWORD=webroot
-      - MYSQL_DATABASE=web
-      - MYSQL_USER=kejilion
-      - MYSQL_PASSWORD=kejilionYYDS
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wordpress
+      - MYSQL_PASSWORD=password
 
   redis:
     image: redis:latest
