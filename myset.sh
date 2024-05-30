@@ -656,7 +656,7 @@ case $choice in
 
               case $sub_choice in
                   1)
-                    cat > /etc/sysctl.conf << EOF
+                    cat >> /etc/sysctl.conf << EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
