@@ -638,7 +638,6 @@ case $choice in
 
   5)
     clear
-    if [ -f "/etc/alpine-release" ]; then
         while true; do
               clear
               congestion_algorithm=$(sysctl -n net.ipv4.tcp_congestion_control)
@@ -649,7 +648,7 @@ case $choice in
               echo "BBR管理"
               echo "------------------------"
               echo "1. 开启BBR              2. 关闭BBR（会重启）"
-              echo "---最新XanMod内核BBR3在主菜单（系统工具）"
+              echo "最新XanMod内核BBR3在主菜单（系统工具）"
               echo "------------------------"
               echo "0. 返回上一级选单"
               echo "------------------------"
@@ -658,14 +657,14 @@ case $choice in
               case $sub_choice in
                   1)
                     cat > /etc/sysctl.conf << EOF
-net.core.default_qdisc=fq_pie
+net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
                     sysctl -p
 
                       ;;
                   2)
-                    sed -i '/net.core.default_qdisc=fq_pie/d' /etc/sysctl.conf
+                    sed -i '/net.core.default_qdisc=fq/d' /etc/sysctl.conf
                     sed -i '/net.ipv4.tcp_congestion_control=bbr/d' /etc/sysctl.conf
                     sysctl -p
                     reboot
@@ -679,14 +678,8 @@ EOF
                       ;;
 
               esac
+              break_end
         done
-    else
-        install wget
-        wget --no-check-certificate -O tcpx.sh https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh
-        chmod +x tcpx.sh
-        ./tcpx.sh
-    fi
-
     ;;
 
   6)
