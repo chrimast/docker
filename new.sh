@@ -4583,14 +4583,6 @@ linux_tools() {
 			  iftop
 			  send_stats "安装iftop"
 			  ;;
-			7)
-			  clear
-			  install unzip
-			  clear
-			  echo "工具已安装，使用方法如下："
-			  unzip
-			  send_stats "安装unzip"
-			  ;;
 			9)
 			  clear
 			  install tmux
@@ -4641,83 +4633,6 @@ linux_tools() {
 			  fzf
 			  cd ~
 			  send_stats "安装fzf"
-			  ;;
-			15)
-			  clear
-			  install vim
-			  cd /
-			  clear
-			  vim -h
-			  cd ~
-			  send_stats "安装vim"
-			  ;;
-			16)
-			  clear
-			  install nano
-			  cd /
-			  clear
-			  nano -h
-			  cd ~
-			  send_stats "安装nano"
-			  ;;
-
-
-			17)
-			  clear
-			  install git
-			  cd /
-			  clear
-			  git --help
-			  cd ~
-			  send_stats "安装git"
-			  ;;
-
-			21)
-			  clear
-			  install cmatrix
-			  clear
-			  cmatrix
-			  send_stats "安装cmatrix"
-			  ;;
-			22)
-			  clear
-			  install sl
-			  clear
-			  sl
-			  send_stats "安装sl"
-			  ;;
-			26)
-			  clear
-			  install bastet
-			  clear
-			  bastet
-			  send_stats "安装bastet"
-			  ;;
-			27)
-			  clear
-			  install nsnake
-			  clear
-			  nsnake
-			  send_stats "安装nsnake"
-			  ;;
-			28)
-			  clear
-			  install ninvaders
-			  clear
-			  ninvaders
-			  send_stats "安装ninvaders"
-			  ;;
-
-		  31)
-			  clear
-			  send_stats "全部安装"
-			  install curl wget sudo socat htop iftop unzip tar tmux ffmpeg btop ranger ncdu fzf cmatrix sl bastet nsnake ninvaders vim nano git
-			  ;;
-
-		  32)
-			  clear
-			  send_stats "全部安装（不含游戏和屏保）"
-			  install curl wget sudo socat htop iftop unzip tar tmux ffmpeg btop ranger ncdu fzf vim nano git
 			  ;;
 
 
