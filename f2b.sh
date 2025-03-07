@@ -1,8 +1,13 @@
 #!/bin/bash
 # ---------------------------------
 # 1. 在 nginx.conf 中添加CF的IP库白名单
-file_path="/opt/1panel/apps/openresty/openresty/conf/nginx.conf"
-# 要添加的内容
+sed -i '/http {/r /dev/stdin' /opt/1panel/apps/openresty/openresty/conf/nginx.conf <<EOF
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 203.0.113.0/24;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+EOF
+# 自定义CF真实IP
 content="# CloudFlare IP
 set_real_ip_from 103.21.244.0/22;
 set_real_ip_from 103.22.200.0/22;
