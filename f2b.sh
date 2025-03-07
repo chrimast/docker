@@ -27,6 +27,7 @@ sed -i '/http {/r /dev/stdin' /opt/1panel/apps/openresty/openresty/conf/nginx.co
     set_real_ip_from 2c0f:f248::/32;
     real_ip_header CF-Connecting-IP;
     real_ip_recursive on;
+    # 启用CF真实IP
 EOF
 
 echo "CF地址范围添加完成"
