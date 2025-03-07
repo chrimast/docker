@@ -149,4 +149,4 @@ logpath = /opt/1panel/apps/openresty/openresty/log/*.log
 
 EOF
 
-echo "jail.local配置完成"
+echo "jail.local配置添加完成"
