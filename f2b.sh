@@ -35,8 +35,7 @@ echo "CF地址范围添加完成"
 
 # ------------------------------
 # 2. 在文件 action.d/cloudflare.conf 中添加CF配置
-sed -i "/^cfuser =/ s/$/ chrimast@gmail.com/" /etc/fail2ban/action.d/cloudflare.conf
-sed -i "/^cftoken =/ s/$/ c85cf3a6a278ab2fb70629072677ca58b4ff3/" /etc/fail2ban/action.d/cloudflare.conf
+sed -i -e "/^cfuser =/ s/$/ chrimast@gmail.com/" -e "/^cftoken =/ s/$/ c85cf3a6a278ab2fb70629072677ca58b4ff3/" /etc/fail2ban/action.d/cloudflare.conf
 echo -e "\ncftarget = ip" >> /etc/fail2ban/action.d/cloudflare.conf
 echo -e "\ncftarget_v6 = ipv6" >> /etc/fail2ban/action.d/cloudflare.conf
 
