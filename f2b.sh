@@ -2,7 +2,6 @@
 # ---------------------------------
 # 1. 在 nginx.conf 中添加CF的IP库白名单
 sed -i '/http {/r /dev/stdin' /opt/1panel/apps/openresty/openresty/conf/nginx.conf <<EOF
-
     # CloudFlare IP范围
     set_real_ip_from 103.21.244.0/22;
     set_real_ip_from 103.22.200.0/22;
@@ -58,7 +57,6 @@ echo "nginx-cc.conf文件创建完成"
 # -------------------------------
 # 4. 追加配置到 jail.local 文件
 cat >> /etc/fail2ban/jail.local <<EOF
-
 # 自定义 fail2ban 配置
 # DEFAULT-START
 [DEFAULT]
