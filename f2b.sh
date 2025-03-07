@@ -66,6 +66,27 @@ EOF
 cat >> /etc/fail2ban/jail.local <<EOF
 
 # 自定义 fail2ban 配置
+# DEFAULT-START
+[DEFAULT]
+bantime = 600
+findtime = 300
+maxretry = 5
+banaction = iptables-allports
+action = cloudflare
+# DEFAULT-END
+
+[sshd]
+ignoreip = 127.0.0.1/8
+enabled = true
+filter = sshd
+port = 2233
+maxretry = 5
+findtime = 300
+bantime = 600
+banaction = iptables-allports
+action = cloudflare
+logpath = /var/log/auth.log
+
 [docker-nginx-cc]
 enabled = true
 chain = DOCKER-USER
@@ -74,6 +95,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+          /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 maxretry = 5
 bantime = 3600
 findtime = 600
@@ -87,6 +109,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+          /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 maxretry = 2
 
 [docker-nginx-botsearch]
@@ -97,6 +120,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+                /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 
 [docker-nginx-http-auth]
 enabled = true
@@ -106,6 +130,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+                /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 
 [docker-nginx-limit-req]
 enabled = true
@@ -115,6 +140,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+                /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 
 [docker-php-url-fopen]
 enabled = true
@@ -124,6 +150,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
+                /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 
 EOF
 
