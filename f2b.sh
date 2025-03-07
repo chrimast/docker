@@ -143,7 +143,7 @@ port = http,https
 banaction = iptables-allports
 action = cloudflare
 logpath = /opt/1panel/apps/openresty/openresty/log/*.log
-                /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
+          /opt/1panel/apps/openresty/openresty/www/sites/*/log/*.log
 
 EOF
 
