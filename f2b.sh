@@ -56,7 +56,7 @@ cat > /etc/fail2ban/filter.d/nginx-cc.conf <<EOF
 # failregex = ^<HOST> .* "(GET|POST|HEAD).*HTTP.*" (403|404|429) .*
 # failregex = ^<HOST> .* "(GET|POST|HEAD).*HTTP.*" ([45]\d\d) .*
 # ignoreregex =.*(robots.txt|favicon.ico|jpg|png)
-failregex = ^<HOST> .* HTTP.* (403|429) .*$ 
+failregex = ^<HOST> .* HTTP.* (403|429) .*$
 ignoreregex = ^.*(\/(?:robots\.txt|favicon\.ico|.*\.(?:jpg|png|gif|jpeg|svg|webp|bmp|tiff|css|js|woff|woff2|eot|ttf|otf))$)
 
 EOF
