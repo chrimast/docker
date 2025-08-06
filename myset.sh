@@ -292,7 +292,6 @@ echo "4. 常用工具 ▶"
 echo "5. BBR管理 ▶"
 echo "6. Docker管理 ▶ "
 echo "7. WARP管理 ▶ "
-echo "8. 测试脚本合集 ▶ "
 echo "9. 甲骨文云脚本合集 ▶ "
 echo "10. 备份与还原"
 echo "12. 我的工作区 ▶ "
@@ -499,20 +498,12 @@ case $choice in
       clear
       echo "▶ 安装常用工具"
       echo "------------------------"
-      echo "1. curl 下载工具"
-      echo "2. wget 下载工具"
-      echo "3. sudo 超级管理权限工具"
       echo "4. socat 通信连接工具 （申请域名证书必备）"
       echo "5. htop 系统监控工具"
       echo "6. iftop 网络流量监控工具"
-      echo "7. unzip ZIP压缩解压工具"
-      echo "8. tar GZ压缩解压工具"
       echo "9. tmux 多路后台运行工具"
       echo "10. ffmpeg 视频编码直播推流工具"
       echo "11. btop 现代化监控工具"
-      echo "------------------------"
-      echo "31. 全部安装"
-      echo "32. 全部卸载"
       echo "------------------------"
       echo "41. 安装指定工具"
       echo "42. 卸载指定工具"
@@ -522,27 +513,6 @@ case $choice in
       read -p "请输入你的选择: " sub_choice
 
       case $sub_choice in
-          1)
-              clear
-              install curl
-              clear
-              echo "工具已安装，使用方法如下："
-              curl --help
-              ;;
-          2)
-              clear
-              install wget
-              clear
-              echo "工具已安装，使用方法如下："
-              wget --help
-              ;;
-            3)
-              clear
-              install sudo
-              clear
-              echo "工具已安装，使用方法如下："
-              sudo --help
-              ;;
             4)
               clear
               install socat
@@ -561,20 +531,6 @@ case $choice in
               install iftop
               clear
               iftop
-              ;;
-            7)
-              clear
-              install unzip
-              clear
-              echo "工具已安装，使用方法如下："
-              unzip
-              ;;
-            8)
-              clear
-              install tar
-              clear
-              echo "工具已安装，使用方法如下："
-              tar --help
               ;;
             9)
               clear
@@ -597,16 +553,6 @@ case $choice in
               clear
               btop
               ;;
-          31)
-              clear
-              install curl wget sudo socat htop iftop unzip tar tmux ffmpeg btop ranger gdu fzf
-              ;;
-
-          32)
-              clear
-              remove htop iftop unzip tmux ffmpeg btop ranger gdu fzf
-              ;;
-
           41)
               clear
               read -p "请输入安装的工具名（wget curl sudo htop）: " installname
@@ -655,12 +601,10 @@ case $choice in
 
               case $sub_choice in
                   1)
-                    cat >> /etc/sysctl.conf << EOF
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-EOF
+                    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+                    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
                     sysctl -p
-
+                    lsmod | grep bbr
                       ;;
                   2)
                     sed -i '/net.core.default_qdisc=fq/d' /etc/sysctl.conf
@@ -1035,10 +979,7 @@ EOF
               ;;
       esac
       break_end
-
-
     done
-
     ;;
 
 
@@ -1048,100 +989,6 @@ EOF
     wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh [option] [lisence/url/token]
     ;;
 
-  8)
-    while true; do
-      clear
-      echo "▶ 测试脚本合集"
-      echo ""
-      echo "----解锁状态检测-----------"
-      echo "1. ChatGPT解锁状态检测"
-      echo "2. Region流媒体解锁测试"
-      echo "3. yeahwu流媒体解锁检测"
-      echo ""
-      echo "----网络线路测速-----------"
-      echo "11. besttrace三网回程延迟路由测试"
-      echo "12. mtr_trace三网回程线路测试"
-      echo "14. nxtrace快速回程测试脚本"
-      echo "16. ludashi2020三网线路测试"
-      echo ""
-      echo "----硬件性能测试----------"
-      echo "21. yabs性能测试"
-      echo "22. icu/gb5 CPU性能测试脚本"
-      echo ""
-      echo "----综合性测试-----------"
-      echo "31. bench性能测试"
-      echo "32. spiritysdx融合怪测评"
-      echo ""
-      echo "------------------------"
-      echo "0. 返回主菜单"
-      echo "------------------------"
-      read -p "请输入你的选择: " sub_choice
-
-      case $sub_choice in
-          1)
-              clear
-              bash <(curl -Ls https://cdn.jsdelivr.net/gh/missuo/OpenAI-Checker/openai.sh)
-              ;;
-          2)
-              clear
-              bash <(curl -L -s check.unlock.media)
-              ;;
-          3)
-              clear
-              install wget
-              wget -qO- https://github.com/yeahwu/check/raw/main/check.sh | bash
-              ;;
-          11)
-              clear
-              install wget
-              wget -qO- git.io/besttrace | bash
-              ;;
-          12)
-              clear
-              curl https://raw.githubusercontent.com/zhucaidan/mtr_trace/main/mtr_trace.sh | bash
-              ;;
-          14)
-              clear
-              curl nxtrace.org/nt |bash
-              nexttrace --fast-trace --tcp
-              ;;
-
-          16)
-              clear
-              curl https://raw.githubusercontent.com/ludashi2020/backtrace/main/install.sh -sSf | sh
-              ;;
-
-          21)
-              clear
-              curl -sL yabs.sh | bash -s -- -i -5
-              ;;
-          22)
-              clear
-              bash <(curl -sL bash.icu/gb5)
-              ;;
-
-          31)
-              clear
-              curl -Lso- bench.sh | bash
-              ;;
-          32)
-              clear
-              curl -L https://gitlab.com/spiritysdx/za/-/raw/main/ecs.sh -o ecs.sh && chmod +x ecs.sh && bash ecs.sh
-              ;;
-
-
-          0)
-              myset
-
-              ;;
-          *)
-              echo "无效的输入!"
-              ;;
-      esac
-      break_end
-
-    done
-    ;;
 
   9)
      while true; do
