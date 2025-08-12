@@ -589,26 +589,24 @@ case $choice in
               queue_algorithm=$(sysctl -n net.core.default_qdisc)
               echo "当前TCP阻塞算法: $congestion_algorithm $queue_algorithm"
               echo "------------------------"
-              echo "如需开启BBR3需在系统工具单独安装"
+              echo "如需开启BBR3请选择 系统工具 单独安装"
               echo "------------------------"
-              echo "是否开启原版BBR（y/n）"
-              echo "------------------------"
-              read -p "请输入你的选择: " sub_choice
+              read -p "是否开启原版BBR（Y/N） " sub_choice
 
               case $sub_choice in
-                  y)
+                  [Yy])
                     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
                     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
                     sysctl -p
                     lsmod | grep bbr
                       ;;
 
-                  n)
+                  [Nn])
                       break  # 跳出循环，退出菜单
                       ;;
 
                   *)
-                      break  # 跳出循环，退出菜单
+                      echo "无效的选择，请输入 Y 或 N。"
                       ;;
 
               esac
