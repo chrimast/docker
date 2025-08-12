@@ -588,31 +588,22 @@ case $choice in
               congestion_algorithm=$(sysctl -n net.ipv4.tcp_congestion_control)
               queue_algorithm=$(sysctl -n net.core.default_qdisc)
               echo "当前TCP阻塞算法: $congestion_algorithm $queue_algorithm"
-
-              echo ""
-              echo "BBR管理"
               echo "------------------------"
-              echo "1. 开启BBR              2. 关闭BBR（会重启）"
-              echo "最新XanMod内核BBR3在主菜单（系统工具）"
+              echo "如需开启BBR3需在系统工具单独安装"
               echo "------------------------"
-              echo "0. 返回上一级选单"
+              echo "是否开启原版BBR（y/n）"
               echo "------------------------"
               read -p "请输入你的选择: " sub_choice
 
               case $sub_choice in
-                  1)
+                  y)
                     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
                     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
                     sysctl -p
                     lsmod | grep bbr
                       ;;
-                  2)
-                    sed -i '/net.core.default_qdisc=fq/d' /etc/sysctl.conf
-                    sed -i '/net.ipv4.tcp_congestion_control=bbr/d' /etc/sysctl.conf
-                    sysctl -p
-                    reboot
-                      ;;
-                  0)
+
+                  n)
                       break  # 跳出循环，退出菜单
                       ;;
 
