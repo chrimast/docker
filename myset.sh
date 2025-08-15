@@ -1795,8 +1795,6 @@ case $choice in
             ;;
 
           12)
-
-
             clear
             # 获取当前交换空间信息
             swap_used=$(free -m | awk 'NR==3{print $3}')
@@ -1820,8 +1818,7 @@ case $choice in
                 read -p "请输入虚拟内存大小MB: " new_swap
                 add_swap
 
-                echo "添加完成，请按任意键返回..."
-                read -n 1  # 等待用户按下任意键
+                echo "添加完成"
                 ;;
               [Nn])
                 echo "已取消"
