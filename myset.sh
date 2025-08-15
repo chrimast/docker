@@ -599,7 +599,8 @@ case $choice in
                     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
                     sysctl -p
                     lsmod | grep bbr
-                    break
+                    read -p "操作完成，按任意键退回..." -n 1 -s
+                    break  # 退出循环
                       ;;
 
                   [Nn])
