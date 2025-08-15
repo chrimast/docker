@@ -599,6 +599,7 @@ case $choice in
                     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
                     sysctl -p
                     lsmod | grep bbr
+                    echo "添加完成"
                       ;;
 
                   [Nn])
