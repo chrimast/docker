@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  chromium:
+    image: linuxserver/chromium:latest
+    container_name: chromium
+    environment:
+      - PUID=1000        # 宿主机用户ID，推荐设置为你自己的UID
+      - PGID=1000        # 宿主机用户组ID
+      - TZ=Asia/Shanghai # 时区
+    volumes:
+      - ./config:/config # 配置文件挂载目录
+    ports:
+      - 3000:3000        # WebUI (noVNC)
+      - 3001:3001        # VNC 端口
+    shm_size: "1gb"      # 共享内存大小，避免浏览器崩溃
+    restart: unless-stopped
