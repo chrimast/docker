@@ -45,7 +45,7 @@ export async function middleware(request: NextRequest) {
   // localstorage 模式
   // ==============================
 
-  if (authInfo.password) {
+  if (authInfo?.password) {
     if (authInfo.password !== process.env.PASSWORD) {
       return handleAuthFailure(request);
     }
