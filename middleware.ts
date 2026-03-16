@@ -7,12 +7,11 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ==============================
-  // 只保护 admin 页面 和 admin API
+  // 只保护 admin 页面
   // ==============================
 
   const isAdminPage = pathname.startsWith('/admin');
-  const isAdminApi = pathname.startsWith('/api/admin');
-
+  
   if (!isAdminPage && !isAdminApi) {
     return NextResponse.next();
   }
@@ -91,6 +90,5 @@ function handleAuthFailure(request: NextRequest): NextResponse {
 export const config = {
   matcher: [
     '/admin/:path*',
-    '/api/admin/:path*'
   ],
 };
