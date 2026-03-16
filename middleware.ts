@@ -8,8 +8,14 @@ import { TOKEN_CONFIG } from '@/lib/refresh-token';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 只有 /admin 才需要认证
-  if (!pathname.startsWith('/admin')) {
+  // ==============================
+  // 只保护 admin 和 admin API
+  // ==============================
+  const isAdminPage = pathname.startsWith('/admin');
+  const isAdminApi = pathname.startsWith('/api/admin');
+
+  // 非管理页面全部公开
+  if (!isAdminPage && !isAdminApi) {
     return NextResponse.next();
   }
 
@@ -177,6 +183,6 @@ function shouldSkipAuth(pathname: string): boolean {
 // 配置middleware匹配规则
 export const config = {
   matcher: [
-    '/admin/:path*'
+    '/((?!_next/static|_next/image|favicon.ico|login|register|oidc-register|warning|api/login|api/register|api/logout|api/auth/oidc|api/auth/refresh|api/cron/|api/server-config|api/proxy-m3u8|api/cms-proxy|api/tvbox/subscribe|api/theme/css|api/openlist/cms-proxy|api/openlist/play|api/emby/cms-proxy|api/emby/play|api/emby/sources|tvbox/).*)',
   ],
 };
