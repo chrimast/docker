@@ -1,13 +1,34 @@
 #!/bin/bash
-ln -sf ~/myset.sh /usr/local/bin/o
+set -o pipefail
 
+if [ "$(id -u)" -ne 0 ]; then
+    echo "请使用 root 运行此脚本"
+    exit 1
+fi
+
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+if [ -f "$SCRIPT_PATH" ]; then
+    ln -sf "$SCRIPT_PATH" /usr/local/bin/o
+fi
 
 ip_address() {
-ipv4_address=$(curl -s ipv4.ip.sb)
-ipv6_address=$(curl -s --max-time 1 ipv6.ip.sb)
+    ipv4_address=$(curl -fsS --max-time 8 https://ipv4.ip.sb 2>/dev/null)
+    ipv6_address=$(curl -fsS --max-time 3 https://ipv6.ip.sb 2>/dev/null)
 }
 
-
+pkg_installed() {
+    local package="$1"
+    if command -v dpkg >/dev/null 2>&1 && dpkg -s "$package" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v rpm >/dev/null 2>&1 && rpm -q "$package" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v apk >/dev/null 2>&1 && apk info -e "$package" >/dev/null 2>&1; then
+        return 0
+    fi
+    command -v "$package" >/dev/null 2>&1
+}
 
 install() {
     if [ $# -eq 0 ]; then
@@ -15,32 +36,35 @@ install() {
         return 1
     fi
 
+    local need=()
+    local package
     for package in "$@"; do
-        if ! command -v "$package" &>/dev/null; then
-            if command -v dnf &>/dev/null; then
-                dnf -y update && dnf install -y "$package"
-            elif command -v yum &>/dev/null; then
-                yum -y update && yum -y install "$package"
-            elif command -v apt &>/dev/null; then
-                apt update -y && apt install -y "$package"
-            elif command -v apk &>/dev/null; then
-                apk update && apk add "$package"
-            else
-                echo "未知的包管理器!"
-                return 1
-            fi
+        if ! pkg_installed "$package"; then
+            need+=("$package")
         fi
     done
+    if [ ${#need[@]} -eq 0 ]; then
+        return 0
+    fi
 
-    return 0
+    if command -v dnf >/dev/null 2>&1; then
+        dnf -y update && dnf install -y "${need[@]}"
+    elif command -v yum >/dev/null 2>&1; then
+        yum -y update && yum -y install "${need[@]}"
+    elif command -v apt >/dev/null 2>&1; then
+        apt update -y && apt install -y "${need[@]}"
+    elif command -v apk >/dev/null 2>&1; then
+        apk update && apk add "${need[@]}"
+    else
+        echo "未知的包管理器!"
+        return 1
+    fi
 }
-
 
 install_dependency() {
-      clear
-      install wget socat unzip tar
+    clear
+    install wget socat unzip tar
 }
-
 
 remove() {
     if [ $# -eq 0 ]; then
@@ -48,241 +72,281 @@ remove() {
         return 1
     fi
 
-    for package in "$@"; do
-        if command -v dnf &>/dev/null; then
-            dnf remove -y "${package}*"
-        elif command -v yum &>/dev/null; then
-            yum remove -y "${package}*"
-        elif command -v apt &>/dev/null; then
-            apt purge -y "${package}*"
-        elif command -v apk &>/dev/null; then
-            apk del "${package}*"
-        else
-            echo "未知的包管理器!"
-            return 1
-        fi
-    done
-
-    return 0
+    if command -v dnf >/dev/null 2>&1; then
+        dnf remove -y "$@"
+    elif command -v yum >/dev/null 2>&1; then
+        yum remove -y "$@"
+    elif command -v apt >/dev/null 2>&1; then
+        apt purge -y "$@"
+    elif command -v apk >/dev/null 2>&1; then
+        apk del "$@"
+    else
+        echo "未知的包管理器!"
+        return 1
+    fi
 }
-
 
 break_end() {
-      echo -e "\033[0;32m操作完成\033[0m"
-      echo "按任意键继续..."
-      read -n 1 -s -r -p ""
-      echo ""
-      clear
+    echo -e "\033[0;32m操作完成\033[0m"
+    echo "按任意键继续..."
+    read -n 1 -s -r -p ""
+    echo ""
+    clear
 }
 
-myset() {
-            o
-            exit
+ssh_listen_port() {
+    local port
+    port=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+    if [ -z "$port" ]; then
+        port=$(awk '/^[[:space:]]*Port[[:space:]]+[0-9]+/{print $2; exit}' /etc/ssh/sshd_config 2>/dev/null)
+    fi
+    echo "${port:-22}"
+}
+
+sysctl_set_file() {
+    local file="$1"
+    shift
+    mkdir -p /etc/sysctl.d
+    printf '%s\n' "$@" > "$file"
+    sysctl -p "$file" >/dev/null 2>&1 || sysctl --system >/dev/null 2>&1 || true
+}
+
+current_timezone() {
+    if command -v timedatectl >/dev/null 2>&1; then
+        timedatectl show --property=Timezone --value 2>/dev/null && return 0
+    fi
+    if [ -L /etc/localtime ]; then
+        readlink /etc/localtime | sed 's|.*/zoneinfo/||'
+        return 0
+    fi
+    cat /etc/timezone 2>/dev/null || echo "unknown"
+}
+
+set_timezone() {
+    local tz="$1"
+    if [ ! -f "/usr/share/zoneinfo/$tz" ]; then
+        echo "时区文件不存在: $tz"
+        return 1
+    fi
+    if command -v timedatectl >/dev/null 2>&1; then
+        timedatectl set-timezone "$tz"
+    else
+        ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime
+        echo "$tz" > /etc/timezone 2>/dev/null || true
+    fi
+    echo "时区已设置为 $tz"
+}
+
+apt_source_files() {
+    local files=()
+    [ -f /etc/apt/sources.list ] && files+=(/etc/apt/sources.list)
+    local f
+    for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+        [ -f "$f" ] && files+=("$f")
+    done
+    printf '%s\n' "${files[@]}"
+}
+
+rewrite_apt_mirror() {
+    local from="${1%/}"
+    local to="${2%/}"
+    local file
+    [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ] || return 0
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        sed -i "s|${from}|${to}|g" "$file"
+    done < <(apt_source_files)
 }
 
 install_add_docker() {
     if [ -f "/etc/alpine-release" ]; then
         apk update
-        apk add docker docker-compose
+        apk add docker docker-cli-compose || apk add docker docker-compose
         rc-update add docker default
         service docker start
     else
-        curl -fsSL https://get.docker.com | sh && ln -s /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin
+        curl -fsSL https://get.docker.com | sh
+        if [ -x /usr/libexec/docker/cli-plugins/docker-compose ]; then
+            ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+        fi
         systemctl start docker
         systemctl enable docker
     fi
-
     sleep 2
 }
 
 install_docker() {
-    if ! command -v docker &>/dev/null; then
+    if ! command -v docker >/dev/null 2>&1; then
         install_add_docker
     else
         echo "Docker 已经安装"
     fi
 }
 
-
 iptables_open() {
-    iptables -P INPUT ACCEPT
-    iptables -P FORWARD ACCEPT
-    iptables -P OUTPUT ACCEPT
-    iptables -F
-
-    ip6tables -P INPUT ACCEPT
-    ip6tables -P FORWARD ACCEPT
-    ip6tables -P OUTPUT ACCEPT
-    ip6tables -F
-
+    echo "警告: 将清空 iptables/ip6tables 规则，并把默认策略改为 ACCEPT。"
+    read -p "确定继续吗？(Y/N): " open_choice
+    case "$open_choice" in
+        [Yy])
+            iptables -P INPUT ACCEPT
+            iptables -P FORWARD ACCEPT
+            iptables -P OUTPUT ACCEPT
+            iptables -F
+            ip6tables -P INPUT ACCEPT 2>/dev/null || true
+            ip6tables -P FORWARD ACCEPT 2>/dev/null || true
+            ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
+            ip6tables -F 2>/dev/null || true
+            ;;
+        *)
+            echo "已取消"
+            return 1
+            ;;
+    esac
 }
 
-
-
 add_swap() {
-    # 获取当前系统中所有的 swap 分区
-    swap_partitions=$(grep -E '^/dev/' /proc/swaps | awk '{print $1}')
+    if ! [[ "${new_swap}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "无效的虚拟内存大小: ${new_swap}"
+        return 1
+    fi
 
-    # 遍历并删除所有的 swap 分区
-    for partition in $swap_partitions; do
-      swapoff "$partition"
-      wipefs -a "$partition"  # 清除文件系统标识符
-      mkswap -f "$partition"
-    done
-
-    # 确保 /swapfile 不再被使用
-    swapoff /swapfile
-
-    # 删除旧的 /swapfile
+    swapoff /swapfile 2>/dev/null || true
     rm -f /swapfile
 
-    # 创建新的 swap 分区
-    dd if=/dev/zero of=/swapfile bs=1M count=$new_swap
+    if command -v fallocate >/dev/null 2>&1 && fallocate -l "${new_swap}M" /swapfile; then
+        :
+    else
+        dd if=/dev/zero of=/swapfile bs=1M count="$new_swap" status=none
+    fi
     chmod 600 /swapfile
     mkswap /swapfile
-    swapon /swapfile
+    if ! swapon /swapfile; then
+        echo "fallocate 创建的 swap 无法启用，改用 dd 重写..."
+        swapoff /swapfile 2>/dev/null || true
+        rm -f /swapfile
+        dd if=/dev/zero of=/swapfile bs=1M count="$new_swap" status=none
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+    fi
 
-    if [ -f /etc/alpine-release ]; then
-        echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
-        echo "nohup swapon /swapfile" >> /etc/local.d/swap.start
-        chmod +x /etc/local.d/swap.start
-        rc-update add local
-    else
+    if [ -f /etc/fstab ]; then
+        sed -i '\#^/swapfile[[:space:]]#d' /etc/fstab
         echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
     fi
 
-    echo "虚拟内存大小已调整为${new_swap}MB"
+    if [ -f /etc/alpine-release ]; then
+        mkdir -p /etc/local.d
+        echo "swapon /swapfile" > /etc/local.d/swap.start
+        chmod +x /etc/local.d/swap.start
+        rc-update add local >/dev/null 2>&1 || true
+    fi
+
+    echo "虚拟内存大小已调整为${new_swap}MB（仅管理 /swapfile，未改动磁盘 swap 分区）"
 }
 
 docker_app() {
-if docker inspect "$docker_name" &>/dev/null; then
-    clear
-    echo "$docker_name 已安装，访问地址: "
-    ip_address
-    echo "http:$ipv4_address:$docker_port"
-    echo ""
-    echo "应用操作"
-    echo "------------------------"
-    echo "1. 更新应用             2. 卸载应用"
-    echo "------------------------"
-    echo "0. 返回上一级选单"
-    echo "------------------------"
-    read -p "请输入你的选择: " sub_choice
+    if docker inspect "$docker_name" &>/dev/null; then
+        clear
+        echo "$docker_name 已安装，访问地址: "
+        ip_address
+        echo "http://${ipv4_address}:$docker_port"
+        echo ""
+        echo "应用操作"
+        echo "------------------------"
+        echo "1. 更新应用             2. 卸载应用"
+        echo "------------------------"
+        echo "0. 返回上一级选单"
+        echo "------------------------"
+        read -p "请输入你的选择: " sub_choice
 
-    case $sub_choice in
-        1)
-            clear
-            docker rm -f "$docker_name"
-            docker rmi -f "$docker_img"
-
-            $docker_rum
-            clear
-            echo "$docker_name 已经安装完成"
-            echo "------------------------"
-            # 获取外部 IP 地址
-            ip_address
-            echo "您可以使用以下地址访问:"
-            echo "http:$ipv4_address:$docker_port"
-            $docker_use
-            $docker_passwd
-            ;;
-        2)
-            clear
-            docker rm -f "$docker_name"
-            docker rmi -f "$docker_img"
-            rm -rf "/home/docker/$docker_name"
-            echo "应用已卸载"
-            ;;
-        0)
-            # 跳出循环，退出菜单
-            ;;
-        *)
-            # 跳出循环，退出菜单
-            ;;
-    esac
-else
-    clear
-    echo "安装提示"
-    echo "$docker_describe"
-    echo "$docker_url"
-    echo ""
-
-    # 提示用户确认安装
-    read -p "确定安装吗？(Y/N): " choice
-    case "$choice" in
-        [Yy])
-            clear
-            # 安装 Docker（请确保有 install_docker 函数）
-            install_docker
-            $docker_rum
-            clear
-            echo "$docker_name 已经安装完成"
-            echo "------------------------"
-            # 获取外部 IP 地址
-            ip_address
-            echo "您可以使用以下地址访问:"
-            echo "http:$ipv4_address:$docker_port"
-            $docker_use
-            $docker_passwd
-            ;;
-        [Nn])
-            # 用户选择不安装
-            ;;
-        *)
-            # 无效输入
-            ;;
-    esac
-fi
-
+        case $sub_choice in
+            1)
+                clear
+                docker rm -f "$docker_name"
+                docker rmi -f "$docker_img"
+                eval "$docker_rum"
+                clear
+                echo "$docker_name 已经安装完成"
+                echo "------------------------"
+                ip_address
+                echo "您可以使用以下地址访问:"
+                echo "http://${ipv4_address}:$docker_port"
+                eval "$docker_use"
+                eval "$docker_passwd"
+                ;;
+            2)
+                clear
+                docker rm -f "$docker_name"
+                docker rmi -f "$docker_img"
+                rm -rf "/home/docker/$docker_name"
+                echo "应用已卸载"
+                ;;
+            0|*)
+                ;;
+        esac
+    else
+        clear
+        echo "安装提示"
+        echo "$docker_describe"
+        echo "$docker_url"
+        echo ""
+        read -p "确定安装吗？(Y/N): " choice
+        case "$choice" in
+            [Yy])
+                clear
+                install_docker
+                eval "$docker_rum"
+                clear
+                echo "$docker_name 已经安装完成"
+                echo "------------------------"
+                ip_address
+                echo "您可以使用以下地址访问:"
+                echo "http://${ipv4_address}:$docker_port"
+                eval "$docker_use"
+                eval "$docker_passwd"
+                ;;
+            *)
+                ;;
+        esac
+    fi
 }
 
 cluster_python3() {
-    cd ~/cluster/
-    curl -sS -O https://raw.githubusercontent.com/kejilion/python-for-vps/main/cluster/$py_task
-    python3 ~/cluster/$py_task
+    mkdir -p "$HOME/cluster"
+    cd "$HOME/cluster/" || return 1
+    curl -fsS -O "https://raw.githubusercontent.com/kejilion/python-for-vps/main/cluster/${py_task}"
+    python3 "$HOME/cluster/$py_task"
 }
 
 tmux_run() {
-    # Check if the session already exists
-    tmux has-session -t $SESSION_NAME 2>/dev/null
-    # $? is a special variable that holds the exit status of the last executed command
-    if [ $? != 0 ]; then
-      # Session doesn't exist, create a new one
-      tmux new -s $SESSION_NAME
+    if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        tmux new -s "$SESSION_NAME"
     else
-      # Session exists, attach to it
-      tmux attach-session -t $SESSION_NAME
+        tmux attach-session -t "$SESSION_NAME"
     fi
 }
 
 server_reboot() {
-
     read -p $'\e[33m现在重启服务器吗？(Y/N): \e[0m' rboot
     case "$rboot" in
-      [Yy])
-        echo "已重启"
-        reboot
-        ;;
-      [Nn])
-        echo "已取消"
-        ;;
-      *)
-        echo "无效的选择，请输入 Y 或 N。"
-        ;;
+        [Yy])
+            echo "已重启"
+            reboot
+            ;;
+        [Nn])
+            echo "已取消"
+            ;;
+        *)
+            echo "无效的选择，请输入 Y 或 N。"
+            ;;
     esac
-
-
 }
-
-
-
-
-
 
 while true; do
 clear
 
-echo -e "\033[96m一键脚本工具 v1.1.1 （支持Ubuntu/Debian/CentOS/Alpine系统）\033[0m"
+echo -e "\033[96m一键脚本工具 v1.1.3 （支持Ubuntu/Debian/CentOS/Alpine系统）\033[0m"
 echo -e "\033[96m-输入\033[93m字母【o】\033[96m可快速启动此脚本-\033[0m"
 echo "------------------------"
 echo "1. 系统信息"
@@ -330,10 +394,10 @@ case $choice in
 
     disk_info=$(df -h | awk '$NF=="/"{printf "%s/%s (%s)", $3, $2, $5}')
 
-    country=$(curl -s ipinfo.io/country)
-    city=$(curl -s ipinfo.io/city)
-
-    isp_info=$(curl -s ipinfo.io/org)
+    ipinfo_json=$(curl -fsS --max-time 8 https://ipinfo.io/json 2>/dev/null)
+    country=$(printf '%s' "$ipinfo_json" | awk -F'"' '/"country"/{print $4; exit}')
+    city=$(printf '%s' "$ipinfo_json" | awk -F'"' '/"city"/{print $4; exit}')
+    isp_info=$(printf '%s' "$ipinfo_json" | awk -F'"' '/"org"/{print $4; exit}')
 
     cpu_arch=$(uname -m)
 
@@ -351,7 +415,7 @@ case $choice in
     if [ -z "$os_info" ]; then
       # 检查常见的发行文件
       if [ -f "/etc/os-release" ]; then
-        os_info=$(source /etc/os-release && echo "$PRETTY_NAME")
+        os_info=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2); print $2; exit}' /etc/os-release)
       elif [ -f "/etc/debian_version" ]; then
         os_info="Debian $(cat /etc/debian_version)"
       elif [ -f "/etc/redhat-release" ]; then
@@ -378,7 +442,7 @@ case $choice in
         }' /proc/net/dev)
 
 
-    current_time=$(date "+%Y-%m-%d %I:%M %p")
+    current_time=$(date "+%Y-%m-%d %H:%M")
 
 
     swap_used=$(free -m | awk 'NR==3{print $3}')
@@ -456,26 +520,25 @@ case $choice in
         apt autoclean -y
         apt remove --purge $(dpkg -l | awk '/^rc/ {print $2}') -y
         journalctl --rotate
-        journalctl --vacuum-time=1s
-        journalctl --vacuum-size=50M
-        apt remove --purge $(dpkg -l | awk '/^ii linux-(image|headers)-[^ ]+/{print $2}' | grep -v $(uname -r | sed 's/-.*//') | xargs) -y
+        journalctl --vacuum-time=7d
+        echo "已保留最近 7 天日志。旧内核未自动卸载，请手动确认后再删。"
     }
 
     clean_redhat() {
         yum autoremove -y
         yum clean all
         journalctl --rotate
-        journalctl --vacuum-time=1s
-        journalctl --vacuum-size=50M
-        yum remove $(rpm -q kernel | grep -v $(uname -r)) -y
+        journalctl --vacuum-time=7d
+        echo "已保留最近 7 天日志。旧内核未自动卸载，请手动确认后再删。"
     }
 
     clean_alpine() {
         apk del --purge $(apk info --installed | awk '{print $1}' | grep -v $(apk info --available | awk '{print $1}'))
         apk autoremove
         apk cache clean
-        rm -rf /var/log/*
         rm -rf /var/cache/apk/*
+        find /var/log -type f -name '*.gz' -delete
+        find /var/log -type f -name '*.old' -delete
 
     }
 
@@ -569,7 +632,7 @@ case $choice in
               server_reboot
               ;;
           0)
-              myset
+              break
               ;;
 
           *)
@@ -595,15 +658,16 @@ case $choice in
 
               case $sub_choice in
                   [Yy])
-                    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_syncookies = 1" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_tw_recycle = 1" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_tw_reuse = 1" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_fin_timeout = 30" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_timestamps = 1   # 0 close or 1 open" >> /etc/sysctl.conf
-                    sysctl -p
-                    lsmod | grep bbr
+                    sysctl_set_file /etc/sysctl.d/99-bbr.conf \
+                        "net.core.default_qdisc=fq" \
+                        "net.ipv4.tcp_congestion_control=bbr" \
+                        "net.ipv4.tcp_syncookies=1" \
+                        "net.ipv4.tcp_tw_reuse=1" \
+                        "net.ipv4.tcp_fin_timeout=30" \
+                        "net.ipv4.tcp_timestamps=1"
+                    sysctl -w net.core.default_qdisc=fq
+                    sysctl -w net.ipv4.tcp_congestion_control=bbr
+                    lsmod | grep bbr || echo "bbr 模块未加载，重启后再查"
                     read -p "操作完成，按任意键退回..." -n 1 -s
                     break  # 退出循环
                       ;;
@@ -628,16 +692,16 @@ case $choice in
       echo "------------------------"
       echo "1. 安装更新Docker环境"
       echo "------------------------"
-      echo "2. 查看Dcoker全局状态"
+      echo "2. 查看 Docker 全局状态"
       echo "------------------------"
-      echo "3. Dcoker容器管理 ▶"
-      echo "4. Dcoker镜像管理 ▶"
-      echo "5. Dcoker网络管理 ▶"
-      echo "6. Dcoker卷管理 ▶"
+      echo "3. Docker 容器管理 ▶"
+      echo "4. Docker 镜像管理 ▶"
+      echo "5. Docker 网络管理 ▶"
+      echo "6. Docker 卷管理 ▶"
       echo "------------------------"
       echo "7. 清理无用的docker容器和镜像网络数据卷"
       echo "------------------------"
-      echo "8. 卸载Dcoker环境"
+      echo "8. 卸载 Docker 环境"
       echo "------------------------"
       echo "0. 返回主菜单"
       echo "------------------------"
@@ -651,20 +715,20 @@ case $choice in
               ;;
           2)
               clear
-              echo "Dcoker版本"
+              echo "Docker 版本"
               docker --version
               docker-compose --version
               echo ""
-              echo "Dcoker镜像列表"
+              echo "Docker 镜像列表"
               docker image ls
               echo ""
-              echo "Dcoker容器列表"
+              echo "Docker 容器列表"
               docker ps -a
               echo ""
-              echo "Dcoker卷列表"
+              echo "Docker 卷列表"
               docker volume ls
               echo ""
-              echo "Dcoker网络列表"
+              echo "Docker 网络列表"
               docker network ls
               echo ""
 
@@ -693,24 +757,25 @@ case $choice in
                   case $sub_choice in
                       1)
                           read -p "请输入创建命令: " dockername
-                          $dockername
+                          echo "将执行: $dockername"
+                          eval "$dockername"
                           ;;
 
                       2)
                           read -p "请输入容器名: " dockername
-                          docker start $dockername
+                          docker start "$dockername"
                           ;;
                       3)
                           read -p "请输入容器名: " dockername
-                          docker stop $dockername
+                          docker stop "$dockername"
                           ;;
                       4)
                           read -p "请输入容器名: " dockername
-                          docker rm -f $dockername
+                          docker rm -f "$dockername"
                           ;;
                       5)
                           read -p "请输入容器名: " dockername
-                          docker restart $dockername
+                          docker restart "$dockername"
                           ;;
                       6)
                           docker start $(docker ps -a -q)
@@ -736,12 +801,12 @@ case $choice in
                           ;;
                       11)
                           read -p "请输入容器名: " dockername
-                          docker exec -it $dockername /bin/bash
+                          docker exec -it "$dockername" /bin/sh
                           break_end
                           ;;
                       12)
                           read -p "请输入容器名: " dockername
-                          docker logs $dockername
+                          docker logs "$dockername"
                           break_end
                           ;;
                       13)
@@ -796,15 +861,15 @@ case $choice in
                   case $sub_choice in
                       1)
                           read -p "请输入镜像名: " dockername
-                          docker pull $dockername
+                          docker pull "$dockername"
                           ;;
                       2)
                           read -p "请输入镜像名: " dockername
-                          docker pull $dockername
+                          docker pull "$dockername"
                           ;;
                       3)
                           read -p "请输入镜像名: " dockername
-                          docker rmi -f $dockername
+                          docker rmi -f "$dockername"
                           ;;
                       4)
                           read -p "确定删除所有镜像吗？(Y/N): " choice
@@ -872,24 +937,24 @@ case $choice in
                   case $sub_choice in
                       1)
                           read -p "设置新网络名: " dockernetwork
-                          docker network create $dockernetwork
+                          docker network create "$dockernetwork"
                           ;;
                       2)
                           read -p "加入网络名: " dockernetwork
                           read -p "那些容器加入该网络: " dockername
-                          docker network connect $dockernetwork $dockername
+                          docker network connect "$dockernetwork" "$dockername"
                           echo ""
                           ;;
                       3)
                           read -p "退出网络名: " dockernetwork
                           read -p "那些容器退出该网络: " dockername
-                          docker network disconnect $dockernetwork $dockername
+                          docker network disconnect "$dockernetwork" "$dockername"
                           echo ""
                           ;;
 
                       4)
                           read -p "请输入要删除的网络名: " dockernetwork
-                          docker network rm $dockernetwork
+                          docker network rm "$dockernetwork"
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
@@ -920,12 +985,12 @@ case $choice in
                   case $sub_choice in
                       1)
                           read -p "设置新卷名: " dockerjuan
-                          docker volume create $dockerjuan
+                          docker volume create "$dockerjuan"
 
                           ;;
                       2)
                           read -p "输入删除卷名: " dockerjuan
-                          docker volume rm $dockerjuan
+                          docker volume rm "$dockerjuan"
 
                           ;;
                       0)
@@ -940,7 +1005,7 @@ case $choice in
               ;;
           7)
               clear
-              read -p "确定清理无用的镜像容器网络吗？(Y/N): " choice
+              read -p "确定清理无用的镜像/容器/网络/未使用卷吗？未挂载卷也会删除 (Y/N): " choice
               case "$choice" in
                 [Yy])
                   docker system prune -af --volumes
@@ -968,7 +1033,7 @@ case $choice in
               esac
               ;;
           0)
-              myset
+              break
               ;;
           *)
               echo "无效的输入!"
@@ -982,7 +1047,7 @@ case $choice in
   7)
     clear
     install wget
-    wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh [option] [lisence/url/token]
+    wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
     ;;
 
 
@@ -1005,7 +1070,8 @@ case $choice in
       case $sub_choice in
           1)
               clear
-              echo "活跃脚本: CPU占用10-20% 内存占用15% "
+              echo "活跃脚本: CPU占用10-20% 内存占用15%"
+              echo "注意: 持续占资源可能违反云厂商条款，仅用于你自己的空闲机器保活。"
               read -p "确定安装吗？(Y/N): " choice
               case "$choice" in
                 [Yy])
@@ -1084,7 +1150,7 @@ case $choice in
 
               ;;
           0)
-              myset
+              break
 
               ;;
           *)
@@ -1154,7 +1220,8 @@ case $choice in
 
       cd ~
       wget -O ${useip}_beifen.sh https://raw.githubusercontent.com/kejilion/sh/main/beifen.sh > /dev/null 2>&1
-      chmod +x ${useip}_beifen.sh
+      chmod 700 ${useip}_beifen.sh
+      echo "远程密码会写入本地脚本，权限已设为 700。建议改用 SSH 密钥后删除明文密码。"
 
       sed -i "s/0.0.0.0/$useip/g" ${useip}_beifen.sh
       sed -i "s/123456/$usepasswd/g" ${useip}_beifen.sh
@@ -1166,11 +1233,11 @@ case $choice in
       case $dingshi in
           1)
               read -p "选择每周备份的星期几 (0-6，0代表星期日): " weekday
-              (crontab -l ; echo "0 0 * * $weekday ./${useip}_beifen.sh") | crontab - > /dev/null 2>&1
+              (crontab -l 2>/dev/null; echo "0 0 * * $weekday $HOME/${useip}_beifen.sh") | crontab -
               ;;
           2)
               read -p "选择每天备份的时间（小时，0-23）: " hour
-              (crontab -l ; echo "0 $hour * * * ./${useip}_beifen.sh") | crontab - > /dev/null 2>&1
+              (crontab -l 2>/dev/null; echo "0 $hour * * * $HOME/${useip}_beifen.sh") | crontab -
               ;;
           *)
               break  # 跳出
@@ -1183,15 +1250,20 @@ case $choice in
 
     3)
       clear
-      cd /home/ && ls -t /home/*.tar.gz | head -1 | xargs -I {} tar -xzf {}
-      check_port
+      latest_tar=$(ls -t /home/web_*.tar.gz 2>/dev/null | head -1)
+      if [ -n "$latest_tar" ]; then
+        tar -xzf "$latest_tar" -C /home/
+        echo "已还原: $latest_tar"
+      else
+        echo "未找到 /home/web_*.tar.gz 备份文件"
+      fi
       install_dependency
       install_docker
 
       ;;
 
     0)
-        myset
+        break
       ;;
 
     *)
@@ -1208,7 +1280,7 @@ case $choice in
     while true; do
       clear
       echo "▶ 我的工作区"
-      echo "系统将为你提供5个后台运行的工作区，你可以用来执行长时间的任务"
+      echo "系统将为你提供10个后台运行的工作区，你可以用来执行长时间的任务"
       echo "即使你断开SSH，工作区中的任务也不会中断，非常方便！来试试吧！"
       echo -e "\033[33m注意: 进入工作区后使用Ctrl+b再单独按d，退出工作区！\033[0m"
       echo "------------------------"
@@ -1300,7 +1372,7 @@ case $choice in
               tmux list-sessions
               ;;
           0)
-              myset
+              break
               ;;
           *)
               echo "无效的输入!"
@@ -1349,9 +1421,13 @@ case $choice in
           1)
               clear
               read -p "请输入你的快捷按键: " kuaijiejian
-              echo "alias $kuaijiejian='~/myset.sh'" >> ~/.bashrc
-              source ~/.bashrc
-              echo "快捷键已设置"
+              if [ -z "$kuaijiejian" ]; then
+                  echo "快捷键不能为空"
+              else
+                  sed -i "/alias ${kuaijiejian}=/d" ~/.bashrc
+                  echo "alias $kuaijiejian='$SCRIPT_PATH'" >> ~/.bashrc
+                  echo "快捷键已设置，重新登录或执行 source ~/.bashrc 后生效"
+              fi
               ;;
 
           2)
@@ -1386,7 +1462,7 @@ case $choice in
                 echo -e "检测到你的系统是 ${YELLOW}${OS}${NC}"
             else
                 echo -e "${RED}很抱歉，你的系统不受支持！${NC}"
-                exit 1
+                continue
             fi
 
             # 检测安装Python3的版本
@@ -1402,14 +1478,14 @@ case $choice in
                 if [[ $CONFIRM == "y" ]]; then
                     if [[ $OS == "CentOS" ]]; then
                         echo ""
-                        rm-rf /usr/local/python3* >/dev/null 2>&1
+                        rm -rf /usr/local/python3* >/dev/null 2>&1
                     else
-                        apt --purge remove python3 python3-pip -y
-                        rm-rf /usr/local/python3*
+                        echo "不会卸载系统自带 python3，只覆盖 /usr/local/python3"
+                        rm -rf /usr/local/python3*
                     fi
                 else
                     echo -e "${YELLOW}已取消升级Python3${NC}"
-                    exit 1
+                    continue
                 fi
             else
                 echo -e "${RED}检测到没有安装Python3。${NC}"
@@ -1418,7 +1494,7 @@ case $choice in
                     echo -e "${GREEN}开始安装最新版Python3...${NC}"
                 else
                     echo -e "${YELLOW}已取消安装Python3${NC}"
-                    exit 1
+                    continue
                 fi
             fi
 
@@ -1450,7 +1526,7 @@ case $choice in
             else
                 clear
                 echo -e "${RED}Python3安装失败！${NC}"
-                exit 1
+                continue
             fi
             cd /root/ && rm -rf Python-${PY_VERSION}.tgz && rm -rf Python-${PY_VERSION}
               ;;
@@ -1470,7 +1546,7 @@ case $choice in
               sed -i 's/#Port/Port/' /etc/ssh/sshd_config
 
               # 读取当前的 SSH 端口号
-              current_port=$(grep -E '^ *Port [0-9]+' /etc/ssh/sshd_config | awk '{print $2}')
+              current_port=$(ssh_listen_port)
 
               # 打印当前的 SSH 端口号
               echo "当前的 SSH 端口号是: $current_port"
@@ -1479,6 +1555,11 @@ case $choice in
 
               # 提示用户输入新的 SSH 端口号
               read -p "请输入新的 SSH 端口号: " new_port
+              if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
+                  echo "无效端口"
+                  break_end
+                  continue
+              fi
 
               # 备份 SSH 配置文件
               cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
@@ -1490,10 +1571,12 @@ case $choice in
               service sshd restart
 
               echo "SSH 端口已修改为: $new_port"
-
-              clear
-              iptables_open
-              remove iptables-persistent ufw firewalld iptables-services > /dev/null 2>&1
+              if [ -f /etc/iptables/rules.v4 ]; then
+                  sed -i "/COMMIT/i -A INPUT -p tcp --dport $new_port -j ACCEPT" /etc/iptables/rules.v4
+                  iptables-restore < /etc/iptables/rules.v4 || true
+                  echo "已尝试在 iptables 中放行新端口 $new_port"
+              fi
+              echo "请保持当前 SSH 会话，另开窗口用新端口测试后再断开。"
 
               ;;
 
@@ -1597,7 +1680,7 @@ case $choice in
                 echo "42. Windows 10"
                 echo "43. Windows Server 2022"
                 echo "44. Windows Server 2019"
-                echo "44. Windows Server 2016"
+                echo "45. Windows Server 2016"
                 echo "------------------------"
                 read -p "请选择要重装的系统: " sys_choice
 
@@ -1752,47 +1835,40 @@ case $choice in
             sudo passwd "$new_username"
 
             # 赋予新用户sudo权限
-            echo "$new_username ALL=(ALL:ALL) ALL" | sudo tee -a /etc/sudoers
+            echo "$new_username ALL=(ALL:ALL) ALL" | sudo tee "/etc/sudoers.d/$new_username" >/dev/null && sudo chmod 440 "/etc/sudoers.d/$new_username"
 
             # 禁用ROOT用户登录
-            sudo passwd -l root
-
+            if id "$new_username" >/dev/null 2>&1; then
+                sudo passwd -l root
+                echo "已锁定 root 密码登录。请确认新用户可 SSH 登录后再断开当前会话。"
+            else
+                echo "新用户创建失败，未锁定 root。"
+            fi
             echo "操作已完成。"
             ;;
 
 
           10)
             clear
-            ipv6_disabled=$(sysctl -n net.ipv6.conf.all.disable_ipv6)
-
-            echo ""
-            if [ "$ipv6_disabled" -eq 1 ]; then
-                echo "当前网络优先级设置: IPv4 优先"
-            else
-                echo "当前网络优先级设置: IPv6 优先"
-            fi
+            echo "通过 /etc/gai.conf 调整 getaddrinfo 优先级，不会关闭 IPv6。"
             echo "------------------------"
-
-            echo ""
-            echo "切换的网络优先级"
-            echo "------------------------"
-            echo "1. IPv4 优先          2. IPv6 优先"
+            echo "1. IPv4 优先          2. IPv6 优先（恢复默认）"
             echo "------------------------"
             read -p "选择优先的网络: " choice
-
+            mkdir -p /etc
+            touch /etc/gai.conf
+            sed -i '/^precedence ::ffff:0:0\/96/d' /etc/gai.conf
             case $choice in
                 1)
-                    sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null 2>&1
+                    echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
                     echo "已切换为 IPv4 优先"
                     ;;
                 2)
-                    sysctl -w net.ipv6.conf.all.disable_ipv6=0 > /dev/null 2>&1
-                    echo "已切换为 IPv6 优先"
+                    echo "已恢复 IPv6 默认优先级（未禁用 IPv6）"
                     ;;
                 *)
                     echo "无效的选择"
                     ;;
-
             esac
             ;;
 
@@ -1886,7 +1962,7 @@ case $choice in
                        sudo passwd "$new_username"
 
                        # 赋予新用户sudo权限
-                       echo "$new_username ALL=(ALL:ALL) ALL" | sudo tee -a /etc/sudoers
+                       echo "$new_username ALL=(ALL:ALL) ALL" | sudo tee "/etc/sudoers.d/$new_username" >/dev/null && sudo chmod 440 "/etc/sudoers.d/$new_username"
 
                        echo "操作已完成。"
 
@@ -1894,12 +1970,13 @@ case $choice in
                       3)
                        read -p "请输入用户名: " username
                        # 赋予新用户sudo权限
-                       echo "$username ALL=(ALL:ALL) ALL" | sudo tee -a /etc/sudoers
+                       echo "$username ALL=(ALL:ALL) ALL" | sudo tee "/etc/sudoers.d/$username" >/dev/null && sudo chmod 440 "/etc/sudoers.d/$username"
                           ;;
                       4)
                        read -p "请输入用户名: " username
                        # 从sudoers文件中移除用户的sudo权限
-                       sudo sed -i "/^$username\sALL=(ALL:ALL)\sALL/d" /etc/sudoers
+                       sudo rm -f "/etc/sudoers.d/$username"
+                       sudo sed -i "/^$username[[:space:]]ALL=(ALL:ALL)[[:space:]]ALL/d" /etc/sudoers
 
                           ;;
                       5)
@@ -1960,9 +2037,23 @@ case $choice in
                   4)
                       tail -f /var/log/fail2ban.log
                       ;;
-                  11)                      
-                      curl -sS -O https://raw.gitmirror.com/chrimast/docker/main/f2b.sh && chmod +x f2b.sh && ./f2b.sh
-                      fail2ban-client status
+                  11)
+                      if ! command -v fail2ban-client >/dev/null 2>&1; then
+                          echo "未检测到 fail2ban，先安装..."
+                          if ! install fail2ban; then
+                              echo "fail2ban 安装失败"
+                              continue
+                          fi
+                      fi
+                      f2b_script=$(mktemp /root/f2b.XXXXXX.sh)
+                      if curl -fsSL -o "$f2b_script" https://raw.githubusercontent.com/chrimast/docker/main/f2b.sh; then
+                          chmod 700 "$f2b_script"
+                          "$f2b_script"
+                      else
+                          echo "下载 f2b.sh 失败"
+                      fi
+                      rm -f "$f2b_script"
+                      fail2ban-client status || echo "fail2ban 未运行或尚未配置 jail"
                       ;;
                   0)
                       break
@@ -1980,13 +2071,13 @@ case $choice in
                 echo "系统时间信息"
 
                 # 获取当前系统时区
-                current_timezone=$(timedatectl show --property=Timezone --value)
+                tz_now=$(current_timezone)
 
                 # 获取当前系统时间
                 current_time=$(date +"%Y-%m-%d %H:%M:%S")
 
                 # 显示时区和时间
-                echo "当前系统时区：$current_timezone"
+                echo "当前系统时区：$tz_now"
                 echo "当前系统时间：$current_time"
 
                 echo ""
@@ -2010,26 +2101,26 @@ case $choice in
                 read -p "请输入你的选择: " sub_choice
 
                 case $sub_choice in
-                    1) timedatectl set-timezone Asia/Shanghai ;;
-                    2) timedatectl set-timezone Asia/Hong_Kong ;;
-                    3) timedatectl set-timezone Asia/Tokyo ;;
-                    4) timedatectl set-timezone Asia/Seoul ;;
-                    5) timedatectl set-timezone Asia/Singapore ;;
-                    6) timedatectl set-timezone Asia/Kolkata ;;
-                    7) timedatectl set-timezone Asia/Dubai ;;
-                    8) timedatectl set-timezone Australia/Sydney ;;
-                    11) timedatectl set-timezone Europe/London ;;
-                    12) timedatectl set-timezone Europe/Paris ;;
-                    13) timedatectl set-timezone Europe/Berlin ;;
-                    14) timedatectl set-timezone Europe/Moscow ;;
-                    15) timedatectl set-timezone Europe/Amsterdam ;;
-                    16) timedatectl set-timezone Europe/Madrid ;;
-                    21) timedatectl set-timezone America/Los_Angeles ;;
-                    22) timedatectl set-timezone America/New_York ;;
-                    23) timedatectl set-timezone America/Vancouver ;;
-                    24) timedatectl set-timezone America/Mexico_City ;;
-                    25) timedatectl set-timezone America/Sao_Paulo ;;
-                    26) timedatectl set-timezone America/Argentina/Buenos_Aires ;;
+                    1) set_timezone Asia/Shanghai ;;
+                    2) set_timezone Asia/Hong_Kong ;;
+                    3) set_timezone Asia/Tokyo ;;
+                    4) set_timezone Asia/Seoul ;;
+                    5) set_timezone Asia/Singapore ;;
+                    6) set_timezone Asia/Kolkata ;;
+                    7) set_timezone Asia/Dubai ;;
+                    8) set_timezone Australia/Sydney ;;
+                    11) set_timezone Europe/London ;;
+                    12) set_timezone Europe/Paris ;;
+                    13) set_timezone Europe/Berlin ;;
+                    14) set_timezone Europe/Moscow ;;
+                    15) set_timezone Europe/Amsterdam ;;
+                    16) set_timezone Europe/Madrid ;;
+                    21) set_timezone America/Los_Angeles ;;
+                    22) set_timezone America/New_York ;;
+                    23) set_timezone America/Vancouver ;;
+                    24) set_timezone America/Mexico_City ;;
+                    25) set_timezone America/Sao_Paulo ;;
+                    26) set_timezone America/Argentina/Buenos_Aires ;;
                     0) break ;; # 跳出循环，退出菜单
                     *) break ;; # 跳出循环，退出菜单
                 esac
@@ -2141,11 +2232,9 @@ case $choice in
             apt install -y linux-xanmod-x64v$version
 
             # 步骤5：启用BBR3
-            cat > /etc/sysctl.conf << EOF
-net.core.default_qdisc=fq_pie
-net.ipv4.tcp_congestion_control=bbr
-EOF
-            sysctl -p
+            sysctl_set_file /etc/sysctl.d/99-bbr3.conf \
+                "net.core.default_qdisc=fq_pie" \
+                "net.ipv4.tcp_congestion_control=bbr"
             echo "XanMod内核安装并BBR3启用成功。重启后生效"
             rm -f /etc/apt/sources.list.d/xanmod-release.list
             rm -f check_x86-64_psabi.sh*
@@ -2174,7 +2263,7 @@ EOF
                   echo "防火墙管理"
                   echo "------------------------"
                   echo "1. 开放指定端口              2. 关闭指定端口"
-                  echo "3. 开放所有端口              4. 关闭所有端口"
+                  echo "3. 放行全部入站              4. 仅放行 SSH（拒绝其他入站）"
                   echo "------------------------"
                   echo "5. IP白名单                  6. IP黑名单"
                   echo "7. 清除指定IP"
@@ -2200,7 +2289,7 @@ EOF
                         ;;
 
                       3)
-                      current_port=$(grep -E '^ *Port [0-9]+' /etc/ssh/sshd_config | awk '{print $2}')
+                      current_port=$(ssh_listen_port)
 
                       cat > /etc/iptables/rules.v4 << EOF
 *filter
@@ -2218,7 +2307,7 @@ EOF
 
                           ;;
                       4)
-                      current_port=$(grep -E '^ *Port [0-9]+' /etc/ssh/sshd_config | awk '{print $2}')
+                      current_port=$(ssh_listen_port)
 
                       cat > /etc/iptables/rules.v4 << EOF
 *filter
@@ -2292,13 +2381,11 @@ EOF
             fi
 
           clear
-          iptables_open
-          remove iptables-persistent ufw
-          rm /etc/iptables/rules.v4
-
+          remove ufw
+          mkdir -p /etc/iptables
           apt update -y && apt install -y iptables-persistent
 
-          current_port=$(grep -E '^ *Port [0-9]+' /etc/ssh/sshd_config | awk '{print $2}')
+          current_port=$(ssh_listen_port)
 
           cat > /etc/iptables/rules.v4 << EOF
 *filter
@@ -2351,7 +2438,6 @@ EOF
                   echo "主机名已更改为: $new_hostname"
               else
                   echo "无效的主机名。未更改主机名。"
-                  exit 1
               fi
           else
               echo "未更改主机名。"
@@ -2371,6 +2457,8 @@ EOF
           # 定义 Debian 更新源
           aliyun_debian_source="http://mirrors.aliyun.com/debian/"
           official_debian_source="http://deb.debian.org/debian/"
+          aliyun_debian_security="http://mirrors.aliyun.com/debian-security/"
+          official_debian_security="http://security.debian.org/debian-security/"
           initial_debian_source=""
 
           # 定义 CentOS 更新源
@@ -2381,28 +2469,30 @@ EOF
           # 获取当前更新源并设置初始源
           case "$ID" in
               ubuntu)
-                  initial_ubuntu_source=$(grep -E '^deb ' /etc/apt/sources.list | head -n 1 | awk '{print $2}')
+                  initial_ubuntu_source=$(grep -hE '^URIs:|^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null | awk '{print $2}' | head -n 1)
                   ;;
               debian)
-                  initial_debian_source=$(grep -E '^deb ' /etc/apt/sources.list | head -n 1 | awk '{print $2}')
+                  initial_debian_source=$(grep -hE '^URIs:|^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null | awk '{print $2}' | head -n 1)
                   ;;
               centos)
                   initial_centos_source=$(awk -F= '/^baseurl=/ {print $2}' /etc/yum.repos.d/CentOS-Base.repo | head -n 1 | tr -d ' ')
                   ;;
               *)
                   echo "未知系统，无法执行切换源脚本"
-                  exit 1
+                  continue
                   ;;
           esac
 
           # 备份当前源
           backup_sources() {
               case "$ID" in
-                  ubuntu)
-                      cp /etc/apt/sources.list /etc/apt/sources.list.bak
-                      ;;
-                  debian)
-                      cp /etc/apt/sources.list /etc/apt/sources.list.bak
+                  ubuntu|debian)
+                      local file
+                      while IFS= read -r file; do
+                          [ -n "$file" ] || continue
+                          [ -f "${file}.bak" ] || cp "$file" "${file}.bak"
+                      done < <(apt_source_files)
+                      echo "已备份 sources.list 与 sources.list.d 中的源文件为 *.bak"
                       ;;
                   centos)
                       if [ ! -f /etc/yum.repos.d/CentOS-Base.repo.bak ]; then
@@ -2413,47 +2503,65 @@ EOF
                       ;;
                   *)
                       echo "未知系统，无法执行备份操作"
-                      exit 1
+                      return 1
                       ;;
               esac
-              echo "已备份当前更新源为 /etc/apt/sources.list.bak 或 /etc/yum.repos.d/CentOS-Base.repo.bak"
           }
 
           # 还原初始更新源
           restore_initial_source() {
               case "$ID" in
-                  ubuntu)
-                      cp /etc/apt/sources.list.bak /etc/apt/sources.list
-                      ;;
-                  debian)
-                      cp /etc/apt/sources.list.bak /etc/apt/sources.list
+                  ubuntu|debian)
+                      local file
+                      while IFS= read -r file; do
+                          [ -f "${file}.bak" ] && cp "${file}.bak" "$file"
+                      done < <(apt_source_files)
+                      echo "已从 *.bak 还原更新源"
                       ;;
                   centos)
                       cp /etc/yum.repos.d/CentOS-Base.repo.bak /etc/yum.repos.d/CentOS-Base.repo
+                      echo "已还原初始更新源"
                       ;;
                   *)
                       echo "未知系统，无法执行还原操作"
-                      exit 1
+                      return 1
                       ;;
               esac
-              echo "已还原初始更新源"
           }
 
           # 函数：切换更新源
           switch_source() {
+              local main_mirror="$1"
+              local security_mirror="${2:-}"
               case "$ID" in
                   ubuntu)
-                      sed -i 's|'"$initial_ubuntu_source"'|'"$1"'|g' /etc/apt/sources.list
+                      rewrite_apt_mirror "http://archive.ubuntu.com/ubuntu" "$main_mirror"
+                      rewrite_apt_mirror "https://archive.ubuntu.com/ubuntu" "$main_mirror"
+                      rewrite_apt_mirror "http://security.ubuntu.com/ubuntu" "$main_mirror"
+                      rewrite_apt_mirror "https://security.ubuntu.com/ubuntu" "$main_mirror"
+                      rewrite_apt_mirror "http://mirrors.aliyun.com/ubuntu" "$main_mirror"
+                      rewrite_apt_mirror "https://mirrors.aliyun.com/ubuntu" "$main_mirror"
                       ;;
                   debian)
-                      sed -i 's|'"$initial_debian_source"'|'"$1"'|g' /etc/apt/sources.list
+                      rewrite_apt_mirror "http://deb.debian.org/debian" "$main_mirror"
+                      rewrite_apt_mirror "https://deb.debian.org/debian" "$main_mirror"
+                      rewrite_apt_mirror "http://mirrors.aliyun.com/debian" "$main_mirror"
+                      rewrite_apt_mirror "https://mirrors.aliyun.com/debian" "$main_mirror"
+                      if [ -n "$security_mirror" ]; then
+                          rewrite_apt_mirror "http://security.debian.org/debian-security" "$security_mirror"
+                          rewrite_apt_mirror "https://security.debian.org/debian-security" "$security_mirror"
+                          rewrite_apt_mirror "http://mirrors.aliyun.com/debian-security" "$security_mirror"
+                          rewrite_apt_mirror "https://mirrors.aliyun.com/debian-security" "$security_mirror"
+                          rewrite_apt_mirror "http://security.debian.org" "$security_mirror"
+                          rewrite_apt_mirror "https://security.debian.org" "$security_mirror"
+                      fi
                       ;;
                   centos)
-                      sed -i "s|^baseurl=.*$|baseurl=$1|g" /etc/yum.repos.d/CentOS-Base.repo
+                      sed -i "s|^baseurl=.*$|baseurl=$main_mirror|g" /etc/yum.repos.d/CentOS-Base.repo
                       ;;
                   *)
                       echo "未知系统，无法执行切换操作"
-                      exit 1
+                      return 1
                       ;;
               esac
           }
@@ -2476,7 +2584,7 @@ EOF
                       ;;
                   *)
                       echo "未知系统，无法执行脚本"
-                      exit 1
+                      break
                       ;;
               esac
 
@@ -2495,17 +2603,16 @@ EOF
                       backup_sources
                       case "$ID" in
                           ubuntu)
-                              switch_source $aliyun_ubuntu_source
+                              switch_source "$aliyun_ubuntu_source"
                               ;;
                           debian)
-                              switch_source $aliyun_debian_source
+                              switch_source "$aliyun_debian_source" "$aliyun_debian_security"
                               ;;
                           centos)
-                              switch_source $aliyun_centos_source
+                              switch_source "$aliyun_centos_source"
                               ;;
                           *)
                               echo "未知系统，无法执行切换操作"
-                              exit 1
                               ;;
                       esac
                       echo "已切换到阿里云源"
@@ -2514,39 +2621,23 @@ EOF
                       backup_sources
                       case "$ID" in
                           ubuntu)
-                              switch_source $official_ubuntu_source
+                              switch_source "$official_ubuntu_source"
                               ;;
                           debian)
-                              switch_source $official_debian_source
+                              switch_source "$official_debian_source" "$official_debian_security"
                               ;;
                           centos)
-                              switch_source $official_centos_source
+                              switch_source "$official_centos_source"
                               ;;
                           *)
                               echo "未知系统，无法执行切换操作"
-                              exit 1
                               ;;
                       esac
                       echo "已切换到官方源"
                       ;;
                   3)
                       backup_sources
-                      case "$ID" in
-                          ubuntu)
-                              switch_source $initial_ubuntu_source
-                              ;;
-                          debian)
-                              switch_source $initial_debian_source
-                              ;;
-                          centos)
-                              switch_source $initial_centos_source
-                              ;;
-                          *)
-                              echo "未知系统，无法执行切换操作"
-                              exit 1
-                              ;;
-                      esac
-                      echo "已切换到初始更新源"
+                      echo "已备份当前更新源"
                       ;;
                   4)
                       restore_initial_source
@@ -2569,7 +2660,7 @@ EOF
               while true; do
                   clear
                   echo "定时任务列表"
-                  crontab -l
+                  crontab -l 2>/dev/null || echo "(当前没有 crontab)"
                   echo ""
                   echo "操作"
                   echo "------------------------"
@@ -2589,11 +2680,11 @@ EOF
                           case $dingshi in
                               1)
                                   read -p "选择周几执行任务？ (0-6，0代表星期日): " weekday
-                                  (crontab -l ; echo "0 0 * * $weekday $newquest") | crontab - > /dev/null 2>&1
+                                  (crontab -l 2>/dev/null; echo "0 0 * * $weekday $newquest") | crontab -
                                   ;;
                               2)
                                   read -p "选择每天几点执行任务？（小时，0-23）: " hour
-                                  (crontab -l ; echo "0 $hour * * * $newquest") | crontab - > /dev/null 2>&1
+                                  (crontab -l 2>/dev/null; echo "0 $hour * * * $newquest") | crontab -
                                   ;;
                               *)
                                   break  # 跳出
@@ -2640,7 +2731,11 @@ EOF
                           ;;
                       2)
                           read -p "请输入需要删除的解析内容关键字: " delhost
-                          sed -i "/$delhost/d" /etc/hosts
+                          if [ -z "$delhost" ] || [ "$delhost" = "localhost" ] || [ "$delhost" = "127.0.0.1" ]; then
+                              echo "拒绝删除该关键字，以免破坏本机解析"
+                          else
+                              sed -i "/${delhost}/d" /etc/hosts
+                          fi
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
@@ -2660,7 +2755,7 @@ EOF
               ;;
 
           0)
-              myset
+              break
               ;;
           *)
               echo "无效的输入!"
