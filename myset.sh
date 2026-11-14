@@ -16,16 +16,36 @@ ip_address() {
     ipv6_address=$(curl -fsS --max-time 3 https://ipv6.ip.sb 2>/dev/null)
 }
 
+confirm_action() {
+    local prompt="${1:-确定继续吗？}"
+    local answer=""
+    read -r -p "$prompt (y/N): " answer
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+pause_after_action() {
+    if [ -t 0 ]; then
+        read -r -n 1 -s -p "按任意键继续..." _ || true
+        printf '\n'
+    fi
+}
+
+valid_port() {
+    local port="${1:-}"
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 ))
+}
+
 pkg_installed() {
-    local package="$1"
-    if command -v dpkg >/dev/null 2>&1 && dpkg -s "$package" >/dev/null 2>&1; then
-        return 0
+    local package="${1:-}"
+    [ -n "$package" ] || return 1
+    if command -v dpkg-query >/dev/null 2>&1; then
+        dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed' && return 0
     fi
-    if command -v rpm >/dev/null 2>&1 && rpm -q "$package" >/dev/null 2>&1; then
-        return 0
+    if command -v rpm >/dev/null 2>&1; then
+        rpm -q "$package" >/dev/null 2>&1 && return 0
     fi
-    if command -v apk >/dev/null 2>&1 && apk info -e "$package" >/dev/null 2>&1; then
-        return 0
+    if command -v apk >/dev/null 2>&1; then
+        apk info -e "$package" >/dev/null 2>&1 && return 0
     fi
     command -v "$package" >/dev/null 2>&1
 }
@@ -48,13 +68,13 @@ install() {
     fi
 
     if command -v dnf >/dev/null 2>&1; then
-        dnf -y update && dnf install -y "${need[@]}"
+        dnf install -y "${need[@]}"
     elif command -v yum >/dev/null 2>&1; then
-        yum -y update && yum -y install "${need[@]}"
-    elif command -v apt >/dev/null 2>&1; then
-        apt update -y && apt install -y "${need[@]}"
+        yum install -y "${need[@]}"
+    elif command -v apt-get >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "${need[@]}"
     elif command -v apk >/dev/null 2>&1; then
-        apk update && apk add "${need[@]}"
+        apk add "${need[@]}"
     else
         echo "未知的包管理器!"
         return 1
@@ -76,8 +96,8 @@ remove() {
         dnf remove -y "$@"
     elif command -v yum >/dev/null 2>&1; then
         yum remove -y "$@"
-    elif command -v apt >/dev/null 2>&1; then
-        apt purge -y "$@"
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get purge -y "$@"
     elif command -v apk >/dev/null 2>&1; then
         apk del "$@"
     else
@@ -185,64 +205,73 @@ install_docker() {
 
 iptables_open() {
     echo "警告: 将清空 iptables/ip6tables 规则，并把默认策略改为 ACCEPT。"
-    read -p "确定继续吗？(Y/N): " open_choice
-    case "$open_choice" in
-        [Yy])
-            iptables -P INPUT ACCEPT
-            iptables -P FORWARD ACCEPT
-            iptables -P OUTPUT ACCEPT
-            iptables -F
-            ip6tables -P INPUT ACCEPT 2>/dev/null || true
-            ip6tables -P FORWARD ACCEPT 2>/dev/null || true
-            ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
-            ip6tables -F 2>/dev/null || true
-            ;;
-        *)
-            echo "已取消"
-            return 1
-            ;;
-    esac
+    if ! confirm_action "确认清空当前防火墙规则"; then
+        echo "已取消"
+        return 1
+    fi
+    iptables -P INPUT ACCEPT && iptables -P FORWARD ACCEPT && iptables -P OUTPUT ACCEPT && iptables -F || return 1
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -P INPUT ACCEPT && ip6tables -P FORWARD ACCEPT && ip6tables -P OUTPUT ACCEPT && ip6tables -F || true
+    fi
 }
 
 add_swap() {
-    if ! [[ "${new_swap}" =~ ^[1-9][0-9]*$ ]]; then
-        echo "无效的虚拟内存大小: ${new_swap}"
+    if ! [[ "${new_swap:-}" =~ ^[1-9][0-9]*$ ]] || (( 10#$new_swap > 1048576 )); then
+        echo "无效大小；请输入 1-1048576 MB"
+        return 1
+    fi
+    if ! confirm_action "创建 ${new_swap}MB swap；成功后替换 /swapfile，现有磁盘 swap 分区不变"; then
+        echo "已取消"
         return 1
     fi
 
-    swapoff /swapfile 2>/dev/null || true
-    rm -f /swapfile
+    local tmp_swap="/swapfile.new.$$"
+    local fstab_tmp
+    fstab_tmp=$(mktemp /etc/fstab.XXXXXX) || return 1
 
-    if command -v fallocate >/dev/null 2>&1 && fallocate -l "${new_swap}M" /swapfile; then
-        :
-    else
-        dd if=/dev/zero of=/swapfile bs=1M count="$new_swap" status=none
+    if command -v fallocate >/dev/null 2>&1; then
+        fallocate -l "${new_swap}M" "$tmp_swap" 2>/dev/null || rm -f "$tmp_swap"
     fi
-    chmod 600 /swapfile
-    mkswap /swapfile
-    if ! swapon /swapfile; then
-        echo "fallocate 创建的 swap 无法启用，改用 dd 重写..."
+    if [ ! -f "$tmp_swap" ]; then
+        dd if=/dev/zero of="$tmp_swap" bs=1M count="$new_swap" status=none || {
+            rm -f "$tmp_swap" "$fstab_tmp"
+            return 1
+        }
+    fi
+    chmod 600 "$tmp_swap" || { rm -f "$tmp_swap" "$fstab_tmp"; return 1; }
+    mkswap "$tmp_swap" >/dev/null || { rm -f "$tmp_swap" "$fstab_tmp"; return 1; }
+    local old_swap_backup=""
+    if [ -e /swapfile ]; then
+        old_swap_backup="/swapfile.backup.$$"
+        if swapon --show=NAME --noheadings 2>/dev/null | grep -Fxq /swapfile; then
+            swapoff /swapfile || { rm -f "$tmp_swap" "$fstab_tmp"; echo "无法停用旧 swap，未修改"; return 1; }
+        fi
+        mv /swapfile "$old_swap_backup" || { rm -f "$tmp_swap" "$fstab_tmp"; echo "无法备份旧 swap，未修改"; return 1; }
+    fi
+    if ! mv "$tmp_swap" /swapfile || ! mkswap /swapfile >/dev/null || ! swapon /swapfile; then
+        echo "新 /swapfile 启用失败，尝试恢复旧 swap"
         swapoff /swapfile 2>/dev/null || true
         rm -f /swapfile
-        dd if=/dev/zero of=/swapfile bs=1M count="$new_swap" status=none
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
+        if [ -n "$old_swap_backup" ]; then mv "$old_swap_backup" /swapfile; swapon /swapfile 2>/dev/null || true; fi
+        rm -f "$fstab_tmp"
+        return 1
     fi
+    if [ -n "$old_swap_backup" ]; then rm -f "$old_swap_backup"; fi
 
     if [ -f /etc/fstab ]; then
-        sed -i '\#^/swapfile[[:space:]]#d' /etc/fstab
-        echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+        grep -vE '^[[:space:]]*/swapfile[[:space:]]' /etc/fstab > "$fstab_tmp"
+        printf '%s\n' '/swapfile swap swap defaults 0 0' >> "$fstab_tmp"
+        cat "$fstab_tmp" > /etc/fstab
     fi
+    rm -f "$fstab_tmp"
 
     if [ -f /etc/alpine-release ]; then
         mkdir -p /etc/local.d
-        echo "swapon /swapfile" > /etc/local.d/swap.start
+        printf '%s\n' 'swapon /swapfile' > /etc/local.d/swap.start
         chmod +x /etc/local.d/swap.start
         rc-update add local >/dev/null 2>&1 || true
     fi
-
-    echo "虚拟内存大小已调整为${new_swap}MB（仅管理 /swapfile，未改动磁盘 swap 分区）"
+    echo "虚拟内存大小已调整为 ${new_swap}MB（仅管理 /swapfile，未改动磁盘 swap 分区）"
 }
 
 docker_app() {
@@ -277,9 +306,14 @@ docker_app() {
                 ;;
             2)
                 clear
-                docker rm -f "$docker_name"
-                docker rmi -f "$docker_img"
-                rm -rf "/home/docker/$docker_name"
+                echo "此操作会删除容器 $docker_name、镜像 $docker_img 及数据目录 /home/docker/$docker_name。"
+                if ! confirm_action "确认卸载并删除该数据目录"; then
+                    echo "已取消"
+                    continue
+                fi
+                docker rm -f "$docker_name" 2>/dev/null || true
+                docker rmi -f "$docker_img" 2>/dev/null || true
+                rm -rf -- "/home/docker/$docker_name"
                 echo "应用已卸载"
                 ;;
             0|*)
@@ -515,31 +549,33 @@ case $choice in
   3)
     clear
     clean_debian() {
-        apt autoremove --purge -y
-        apt clean -y
-        apt autoclean -y
-        apt remove --purge $(dpkg -l | awk '/^rc/ {print $2}') -y
+        apt-get autoremove --purge -y
+        apt-get clean
+        apt-get autoclean -y
+        local residual_packages=()
+        mapfile -t residual_packages < <(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\\n' 2>/dev/null | awk '$1 == "rc" {print $2}')
+        if [ "${#residual_packages[@]}" -gt 0 ]; then
+            apt-get purge -y "${residual_packages[@]}"
+        fi
         journalctl --rotate
         journalctl --vacuum-time=7d
         echo "已保留最近 7 天日志。旧内核未自动卸载，请手动确认后再删。"
     }
 
     clean_redhat() {
-        yum autoremove -y
-        yum clean all
+        dnf autoremove -y 2>/dev/null || yum autoremove -y 2>/dev/null || true
+        dnf clean all 2>/dev/null || yum clean all
         journalctl --rotate
         journalctl --vacuum-time=7d
         echo "已保留最近 7 天日志。旧内核未自动卸载，请手动确认后再删。"
     }
 
     clean_alpine() {
-        apk del --purge $(apk info --installed | awk '{print $1}' | grep -v $(apk info --available | awk '{print $1}'))
-        apk autoremove
         apk cache clean
-        rm -rf /var/cache/apk/*
-        find /var/log -type f -name '*.gz' -delete
-        find /var/log -type f -name '*.old' -delete
-
+        rm -f /var/cache/apk/*.apk
+        apk info --orphaned 2>/dev/null || true
+        find /var/log -type f \( -name '*.gz' -o -name '*.old' \) -delete
+        echo "仅清理缓存和轮转日志；未自动卸载孤儿包。"
     }
 
     # Main script
@@ -618,13 +654,21 @@ case $choice in
               ;;
           41)
               clear
-              read -p "请输入安装的工具名（wget curl sudo htop）: " installname
-              install $installname
+              read -r -p "请输入安装包名（空格分隔，例如 wget curl htop）: " -a package_args
+              if [ "${#package_args[@]}" -gt 0 ]; then
+                  install "${package_args[@]}"
+              else
+                  echo "未提供包名，已取消"
+              fi
               ;;
           42)
               clear
-              read -p "请输入卸载的工具名（htop ufw tmux cmatrix）: " removename
-              remove $removename
+              read -r -p "请输入卸载包名（空格分隔，例如 htop tmux）: " -a package_args
+              if [ "${#package_args[@]}" -gt 0 ] && confirm_action "确认卸载: ${package_args[*]}"; then
+                  remove "${package_args[@]}"
+              else
+                  echo "未提供包名或已取消"
+              fi
               ;;
 
           99)
@@ -639,7 +683,6 @@ case $choice in
               echo "无效的输入!"
               ;;
       esac
-      break_end
   done
 
     ;;
@@ -681,7 +724,6 @@ case $choice in
                       ;;
 
               esac
-              break_end
         done
     ;;
 
@@ -756,9 +798,14 @@ case $choice in
 
                   case $sub_choice in
                       1)
-                          read -p "请输入创建命令: " dockername
-                          echo "将执行: $dockername"
-                          eval "$dockername"
+                          read -r -p "请输入 docker run 参数（不要输入 docker 命令）: " -a docker_args
+                          if [ "${#docker_args[@]}" -eq 0 ] || [ "${docker_args[0]}" != "run" ]; then
+                              echo "仅接受以 run 开头的 docker run 参数；取消本次操作。"
+                          elif confirm_action "将执行 docker ${docker_args[*]}"; then
+                              docker "${docker_args[@]}"
+                          else
+                              echo "已取消"
+                          fi
                           ;;
 
                       2)
@@ -770,34 +817,56 @@ case $choice in
                           docker stop "$dockername"
                           ;;
                       4)
-                          read -p "请输入容器名: " dockername
-                          docker rm -f "$dockername"
+                          read -r -p "请输入容器名: " dockername
+                          if [ -z "$dockername" ]; then
+                              echo "容器名不能为空"
+                          elif docker inspect "$dockername" >/dev/null 2>&1 && confirm_action "强制删除容器 $dockername"; then
+                              docker rm -f "$dockername"
+                          else
+                              echo "容器不存在或已取消"
+                          fi
                           ;;
                       5)
                           read -p "请输入容器名: " dockername
                           docker restart "$dockername"
                           ;;
                       6)
-                          docker start $(docker ps -a -q)
+                          mapfile -t docker_targets < <(docker ps -aq)
+                          if [ "${#docker_targets[@]}" -gt 0 ]; then
+                              docker start "${docker_targets[@]}"
+                          else
+                              echo "没有容器"
+                          fi
                           ;;
                       7)
-                          docker stop $(docker ps -q)
+                          mapfile -t docker_targets < <(docker ps -q)
+                          if [ "${#docker_targets[@]}" -gt 0 ]; then
+                              docker stop "${docker_targets[@]}"
+                          else
+                              echo "没有运行中的容器"
+                          fi
                           ;;
                       8)
-                          read -p "确定删除所有容器吗？(Y/N): " choice
-                          case "$choice" in
-                            [Yy])
-                              docker rm -f $(docker ps -a -q)
-                              ;;
-                            [Nn])
-                              ;;
-                            *)
-                              echo "无效的选择，请输入 Y 或 N。"
-                              ;;
-                          esac
+                          mapfile -t docker_targets < <(docker ps -aq)
+                          if [ "${#docker_targets[@]}" -eq 0 ]; then
+                              echo "没有容器"
+                          else
+                              printf '将删除以下容器：\n%s\n' "${docker_targets[@]}"
+                              read -r -p "输入 DELETE 确认强制删除全部容器: " delete_confirm
+                              if [ "$delete_confirm" = "DELETE" ]; then
+                                  docker rm -f "${docker_targets[@]}"
+                              else
+                                  echo "已取消"
+                              fi
+                          fi
                           ;;
                       9)
-                          docker restart $(docker ps -q)
+                          mapfile -t docker_targets < <(docker ps -q)
+                          if [ "${#docker_targets[@]}" -gt 0 ]; then
+                              docker restart "${docker_targets[@]}"
+                          else
+                              echo "没有运行中的容器"
+                          fi
                           ;;
                       11)
                           read -p "请输入容器名: " dockername
@@ -838,7 +907,7 @@ case $choice in
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -872,25 +941,25 @@ case $choice in
                           docker rmi -f "$dockername"
                           ;;
                       4)
-                          read -p "确定删除所有镜像吗？(Y/N): " choice
-                          case "$choice" in
-                            [Yy])
-                              docker rmi -f $(docker images -q)
-                              ;;
-                            [Nn])
-
-                              ;;
-                            *)
-                              echo "无效的选择，请输入 Y 或 N。"
-                              ;;
-                          esac
+                          mapfile -t image_targets < <(docker images -q | sort -u)
+                          if [ "${#image_targets[@]}" -eq 0 ]; then
+                              echo "没有镜像"
+                          else
+                              printf '将删除以下镜像 ID：\n%s\n' "${image_targets[@]}"
+                              read -r -p "输入 DELETE 确认删除全部镜像: " delete_confirm
+                              if [ "$delete_confirm" = "DELETE" ]; then
+                                  docker rmi -f "${image_targets[@]}"
+                              else
+                                  echo "已取消"
+                              fi
+                          fi
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -953,15 +1022,21 @@ case $choice in
                           ;;
 
                       4)
-                          read -p "请输入要删除的网络名: " dockernetwork
-                          docker network rm "$dockernetwork"
+                          read -r -p "请输入要删除的网络名: " dockernetwork
+                          if [ -z "$dockernetwork" ]; then
+                              echo "网络名不能为空"
+                          elif docker network inspect "$dockernetwork" >/dev/null 2>&1 && confirm_action "确认删除 Docker 网络 $dockernetwork"; then
+                              docker network rm "$dockernetwork"
+                          else
+                              echo "网络不存在或已取消"
+                          fi
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -989,48 +1064,62 @@ case $choice in
 
                           ;;
                       2)
-                          read -p "输入删除卷名: " dockerjuan
-                          docker volume rm "$dockerjuan"
-
+                          read -r -p "输入删除卷名: " dockerjuan
+                          if [ -z "$dockerjuan" ]; then
+                              echo "卷名不能为空"
+                          elif docker volume inspect "$dockerjuan" >/dev/null 2>&1 && confirm_action "确认删除 Docker 卷 $dockerjuan"; then
+                              docker volume rm "$dockerjuan"
+                          else
+                              echo "卷不存在或已取消"
+                          fi
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
               ;;
           7)
               clear
-              read -p "确定清理无用的镜像/容器/网络/未使用卷吗？未挂载卷也会删除 (Y/N): " choice
-              case "$choice" in
-                [Yy])
+              echo "将列出 Docker 垃圾回收目标；只有明确输入 DELETE 才会删除未使用数据卷。"
+              docker system df
+              docker ps -a --filter status=exited
+              docker images --filter dangling=true
+              docker network ls --filter dangling=true
+              docker volume ls --filter dangling=true
+              if confirm_action "确认仅清理 Docker 未使用资源（包含未挂载卷）"; then
                   docker system prune -af --volumes
-                  ;;
-                [Nn])
-                  ;;
-                *)
-                  echo "无效的选择，请输入 Y 或 N。"
-                  ;;
-              esac
+              else
+                  echo "已取消"
+              fi
               ;;
           8)
               clear
-              read -p "确定卸载docker环境吗？(Y/N): " choice
-              case "$choice" in
-                [Yy])
-                  docker rm $(docker ps -a -q) && docker rmi $(docker images -q) && docker network prune
-                  remove docker docker-ce docker-compose > /dev/null 2>&1
-                  ;;
-                [Nn])
-                  ;;
-                *)
-                  echo "无效的选择，请输入 Y 或 N。"
-                  ;;
-              esac
+              echo "卸载 Docker 将影响该主机上的所有容器、镜像、网络和数据卷。"
+              docker ps -a
+              docker volume ls
+              read -r -p "输入 REMOVE-DOCKER 确认卸载并清空所有 Docker 资源: " uninstall_confirm
+              if [ "$uninstall_confirm" = "REMOVE-DOCKER" ]; then
+                  mapfile -t docker_targets < <(docker ps -aq)
+                  [ "${#docker_targets[@]}" -eq 0 ] || docker rm -f "${docker_targets[@]}"
+                  mapfile -t image_targets < <(docker images -q | sort -u)
+                  [ "${#image_targets[@]}" -eq 0 ] || docker rmi -f "${image_targets[@]}"
+                  echo "为避免无意删除持久数据卷，卸载时保留 volumes。"
+                  if [ -f /etc/alpine-release ]; then
+                      rc-update del docker default 2>/dev/null || true
+                      service docker stop 2>/dev/null || true
+                      remove docker docker-cli-compose docker-compose
+                  else
+                      systemctl disable --now docker 2>/dev/null || true
+                      remove docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-compose
+                  fi
+              else
+                  echo "已取消"
+              fi
               ;;
           0)
               break
@@ -1039,9 +1128,8 @@ case $choice in
               echo "无效的输入!"
               ;;
       esac
-      break_end
-    done
-    ;;
+  done
+  ;;
 
 
   7)
@@ -1157,10 +1245,8 @@ case $choice in
               echo "无效的输入!"
               ;;
       esac
-      break_end
-
-    done
-    ;;
+  done
+  ;;
 
 
   10)
@@ -1268,11 +1354,10 @@ case $choice in
 
     *)
         echo "无效的输入!"
+        ;;
     esac
-    break_end
-
   done
-      ;;
+  ;;
 
 
 
@@ -1378,10 +1463,8 @@ case $choice in
               echo "无效的输入!"
               ;;
       esac
-      break_end
-
-    done
-    ;;
+  done
+  ;;
 
   13)
     while true; do
@@ -1474,19 +1557,12 @@ case $choice in
             # 卸载Python3旧版本
             if [[ $VERSION == "3"* ]]; then
                 echo -e "${YELLOW}你的Python3版本是${NC}${RED}${VERSION}${NC}，${YELLOW}最新版本是${NC}${RED}${PY_VERSION}${NC}"
-                read -p "是否确认升级最新版Python3？默认不升级 [y/N]: " CONFIRM
-                if [[ $CONFIRM == "y" ]]; then
-                    if [[ $OS == "CentOS" ]]; then
-                        echo ""
-                        rm -rf /usr/local/python3* >/dev/null 2>&1
-                    else
-                        echo "不会卸载系统自带 python3，只覆盖 /usr/local/python3"
-                        rm -rf /usr/local/python3*
-                    fi
-                else
+                read -r -p "确认升级 /usr/local/python3（保留系统 Python，不预先删除旧安装）？默认不升级 [y/N]: " CONFIRM
+                if [[ ! "$CONFIRM" =~ ^[Yy]([Ee][Ss])?$ ]]; then
                     echo -e "${YELLOW}已取消升级Python3${NC}"
                     continue
                 fi
+                echo "旧版本保留在 /usr/local/python3；只有新版本安装成功后才切换链接。"
             else
                 echo -e "${RED}检测到没有安装Python3。${NC}"
                 read -p "是否确认安装最新版Python3？默认安装 [Y/n]: " CONFIRM
@@ -1539,47 +1615,66 @@ case $choice in
 
               ;;
           6)
-              clear
-              #!/bin/bash
-
-              # 去掉 #Port 的注释
-              sed -i 's/#Port/Port/' /etc/ssh/sshd_config
-
-              # 读取当前的 SSH 端口号
               current_port=$(ssh_listen_port)
-
-              # 打印当前的 SSH 端口号
-              echo "当前的 SSH 端口号是: $current_port"
-
-              echo "------------------------"
-
-              # 提示用户输入新的 SSH 端口号
-              read -p "请输入新的 SSH 端口号: " new_port
-              if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
-                  echo "无效端口"
-                  break_end
+              echo "当前 SSH 端口：$current_port"
+              read -r -p "请输入新的 SSH 端口: " new_port
+              if ! valid_port "$new_port"; then
+                  echo "端口须为 1-65535 的整数"
+                  continue
+              fi
+              if [ "$new_port" = "$current_port" ]; then
+                  echo "端口未变化"
+                  continue
+              fi
+              if ! confirm_action "即将修改 SSH 端口 $current_port -> $new_port；请保持当前会话并用新端口测试"; then
+                  echo "已取消"
                   continue
               fi
 
-              # 备份 SSH 配置文件
-              cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+              ssh_config=/etc/ssh/sshd_config
+              ssh_backup="${ssh_config}.bak.$(date +%Y%m%d-%H%M%S)"
+              cp -a "$ssh_config" "$ssh_backup" || { echo "备份失败，未修改"; continue; }
+              tmp_config=$(mktemp "${ssh_config}.XXXXXX") || { echo "无法创建临时文件"; continue; }
+              awk -v port="$new_port" '
+                  BEGIN { inserted=0 }
+                  /^[[:space:]]*Port[[:space:]]+[0-9]+([[:space:]]|$)/ {
+                      if (!inserted) { print "Port " port; inserted=1 }
+                      next
+                  }
+                  { print }
+                  END { if (!inserted) print "Port " port }
+              ' "$ssh_config" > "$tmp_config" || { rm -f "$tmp_config"; echo "生成新配置失败"; continue; }
+              chmod --reference="$ssh_config" "$tmp_config" 2>/dev/null || chmod 600 "$tmp_config"
+              chown --reference="$ssh_config" "$tmp_config" 2>/dev/null || true
+              mv "$tmp_config" "$ssh_config"
 
-              # 替换 SSH 配置文件中的端口号
-              sed -i "s/Port [0-9]\+/Port $new_port/g" /etc/ssh/sshd_config
-
-              # 重启 SSH 服务
-              service sshd restart
-
-              echo "SSH 端口已修改为: $new_port"
-              if [ -f /etc/iptables/rules.v4 ]; then
-                  sed -i "/COMMIT/i -A INPUT -p tcp --dport $new_port -j ACCEPT" /etc/iptables/rules.v4
-                  iptables-restore < /etc/iptables/rules.v4 || true
-                  echo "已尝试在 iptables 中放行新端口 $new_port"
+              if command -v sshd >/dev/null 2>&1 && ! sshd -t; then
+                  cp -a "$ssh_backup" "$ssh_config"
+                  echo "sshd 配置校验失败，已恢复备份: $ssh_backup"
+                  continue
               fi
-              echo "请保持当前 SSH 会话，另开窗口用新端口测试后再断开。"
+              if command -v systemctl >/dev/null 2>&1; then
+                  if ! systemctl restart ssh 2>/dev/null && ! systemctl restart sshd 2>/dev/null; then
+                      cp -a "$ssh_backup" "$ssh_config"
+                      systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+                      echo "SSH 重启失败，已回滚配置"
+                      continue
+                  fi
+              elif command -v service >/dev/null 2>&1; then
+                  if ! service ssh restart 2>/dev/null && ! service sshd restart 2>/dev/null; then
+                      cp -a "$ssh_backup" "$ssh_config"
+                      service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+                      echo "SSH 重启失败，已回滚配置"
+                      continue
+                  fi
+              fi
 
+              if [ -f /etc/iptables/rules.v4 ]; then
+                  grep -Fq -- "--dport $new_port -j ACCEPT" /etc/iptables/rules.v4 || sed -i "/COMMIT/i -A INPUT -p tcp --dport $new_port -j ACCEPT" /etc/iptables/rules.v4
+                  iptables-restore < /etc/iptables/rules.v4 || true
+              fi
+              echo "SSH 端口已修改为 $new_port。保持当前会话并测试新端口后再断开。备份: $ssh_backup"
               ;;
-
 
           7)
             clear
@@ -1990,7 +2085,7 @@ case $choice in
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -2417,32 +2512,27 @@ EOF
               ;;
 
           18)
-          clear
           current_hostname=$(hostname)
           echo "当前主机名: $current_hostname"
-          read -p "是否要更改主机名？(y/n): " answer
-          if [ "$answer" == "y" ]; then
-              # 获取新的主机名
-              read -p "请输入新的主机名: " new_hostname
-              if [ -n "$new_hostname" ]; then
-                  if [ -f /etc/alpine-release ]; then
-                      # Alpine
-                      echo "$new_hostname" > /etc/hostname
-                      hostname "$new_hostname"
-                  else
-                      # 其他系统，如 Debian, Ubuntu, CentOS 等
-                      hostnamectl set-hostname "$new_hostname"
-                      sed -i "s/$current_hostname/$new_hostname/g" /etc/hostname
-                      systemctl restart systemd-hostnamed
-                  fi
-                  echo "主机名已更改为: $new_hostname"
-              else
-                  echo "无效的主机名。未更改主机名。"
+          read -r -p "是否更改主机名？(y/N): " answer
+          if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+              read -r -p "请输入新的主机名（仅字母、数字、点、连字符）: " new_hostname
+              if [[ ! "$new_hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ || "$new_hostname" == *..* ]]; then
+                  echo "主机名格式无效，未更改"
+                  continue
               fi
+              if command -v hostnamectl >/dev/null 2>&1; then
+                  hostnamectl set-hostname "$new_hostname" || { echo "设置失败"; continue; }
+              else
+                  echo "$new_hostname" > /etc/hostname || { echo "写入 /etc/hostname 失败"; continue; }
+                  hostname "$new_hostname" || true
+              fi
+              echo "主机名已更改为: $new_hostname"
+              echo "未改写 /etc/hosts；如有需要请手动增加精确主机名映射。"
           else
               echo "未更改主机名。"
           fi
-              ;;
+          ;;
 
           19)
 
@@ -2672,35 +2762,54 @@ EOF
 
                   case $sub_choice in
                       1)
-                          read -p "请输入新任务的执行命令: " newquest
-                          echo "------------------------"
-                          echo "1. 每周任务                 2. 每天任务"
-                          read -p "请输入你的选择: " dingshi
-
+                          read -r -p "请输入新任务执行命令: " newquest
+                          if [ -z "$newquest" ]; then
+                              echo "命令不能为空"
+                              continue
+                          fi
+                          echo "1. 每周任务  2. 每天任务"
+                          read -r -p "请输入你的选择: " dingshi
                           case $dingshi in
                               1)
-                                  read -p "选择周几执行任务？ (0-6，0代表星期日): " weekday
-                                  (crontab -l 2>/dev/null; echo "0 0 * * $weekday $newquest") | crontab -
+                                  read -r -p "选择周几执行 (0-6，0=周日): " weekday
+                                  if [[ ! "$weekday" =~ ^[0-6]$ ]]; then echo "星期输入无效"; continue; fi
+                                  (crontab -l 2>/dev/null || true; printf '0 0 * * %s %s\n' "$weekday" "$newquest") | crontab -
                                   ;;
                               2)
-                                  read -p "选择每天几点执行任务？（小时，0-23）: " hour
-                                  (crontab -l 2>/dev/null; echo "0 $hour * * * $newquest") | crontab -
+                                  read -r -p "选择每天几点执行 (0-23): " hour
+                                  if [[ ! "$hour" =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then echo "小时输入无效"; continue; fi
+                                  (crontab -l 2>/dev/null || true; printf '0 %s * * * %s\n' "$hour" "$newquest") | crontab -
                                   ;;
-                              *)
-                                  break  # 跳出
-                                  ;;
+                              *) echo "无效的选择，请重新输入" ;;
                           esac
                           ;;
                       2)
-                          read -p "请输入需要删除任务的关键字: " kquest
-                          crontab -l | grep -v "$kquest" | crontab -
+                          read -r -p "请输入要删除任务的完整命令片段（不能为空）: " kquest
+                          if [ -z "$kquest" ]; then
+                              echo "删除条件不能为空，未修改 crontab"
+                              continue
+                          fi
+                          current_crontab=$(crontab -l 2>/dev/null || true)
+                          matches=$(printf '%s\n' "$current_crontab" | grep -F -- "$kquest" || true)
+                          match_count=$(printf '%s\n' "$matches" | awk 'NF{n++} END{print n+0}')
+                          if [ "$match_count" -eq 0 ]; then
+                              echo "没有匹配的任务"
+                          elif [ "$match_count" -gt 1 ]; then
+                              echo "匹配到多条任务，请输入更精确的完整命令："
+                              printf '%s\n' "$matches"
+                          elif confirm_action "确认删除以下任务"; then
+                              printf '%s\n' "$matches"
+                              printf '%s\n' "$current_crontab" | grep -Fv -- "$kquest" | crontab -
+                          else
+                              echo "已取消"
+                          fi
                           ;;
                       0)
                           break  # 跳出循环，退出菜单
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -2725,16 +2834,29 @@ EOF
 
                   case $host_dns in
                       1)
-                          read -p "请输入新的解析记录 格式: 110.25.5.33 kejilion.pro : " addhost
-                          echo "$addhost" >> /etc/hosts
-
+                          read -r -p "请输入解析记录（IP hostname）: " addhost
+                          read -r host_ip host_name extra <<< "$addhost"
+                          if [ -z "$host_ip" ] || [ -z "$host_name" ] || [ -n "$extra" ] || ! [[ "$host_name" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || ! getent ahosts "$host_ip" >/dev/null 2>&1; then
+                              echo "格式无效；请使用有效 IP 和 hostname，例如 203.0.113.10 example.com"
+                          elif awk -v ip="$host_ip" -v host="$host_name" '$1 == ip {for(i=2;i<=NF;i++) if($i==host) found=1} END{exit !found}' /etc/hosts; then
+                              echo "该映射已存在"
+                          else
+                              cp -a /etc/hosts "/etc/hosts.bak.$(date +%Y%m%d-%H%M%S)"
+                              printf '%s\t%s\n' "$host_ip" "$host_name" >> /etc/hosts
+                              echo "已添加映射"
+                          fi
                           ;;
                       2)
-                          read -p "请输入需要删除的解析内容关键字: " delhost
-                          if [ -z "$delhost" ] || [ "$delhost" = "localhost" ] || [ "$delhost" = "127.0.0.1" ]; then
-                              echo "拒绝删除该关键字，以免破坏本机解析"
+                          read -r -p "请输入要删除的精确 hostname: " delhost
+                          if [ -z "$delhost" ] || [[ ! "$delhost" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || [[ "$delhost" == "localhost" ]]; then
+                              echo "hostname 无效或受保护，未修改"
+                          elif ! awk -v host="$delhost" '{for(i=2;i<=NF;i++) if($i==host) found=1} END{exit !found}' /etc/hosts; then
+                              echo "没有找到精确匹配项"
+                          elif confirm_action "确认删除 /etc/hosts 中 hostname=$delhost 的匹配项"; then
+                              cp -a /etc/hosts "/etc/hosts.bak.$(date +%Y%m%d-%H%M%S)"
+                              awk -v host="$delhost" '{keep=1; for(i=2;i<=NF;i++) if($i==host) keep=0; if(keep) print}' /etc/hosts > /etc/hosts.tmp && cat /etc/hosts.tmp > /etc/hosts && rm -f /etc/hosts.tmp
                           else
-                              sed -i "/${delhost}/d" /etc/hosts
+                              echo "已取消"
                           fi
                           ;;
                       0)
@@ -2742,7 +2864,7 @@ EOF
                           ;;
 
                       *)
-                          break  # 跳出循环，退出菜单
+                          echo "无效的选择，请重新输入。"
                           ;;
                   esac
               done
@@ -2779,5 +2901,4 @@ EOF
     echo "无效的输入!"
     ;;
 esac
-    break_end
 done
